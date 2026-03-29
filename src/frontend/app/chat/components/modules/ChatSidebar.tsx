@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap } from 'lucide-react';
-import { HistoryMessage, ModelInfo } from '../../services/api';
+import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap, Plus, Edit, FileText } from 'lucide-react';
+import { HistoryMessage, ModelInfo, SystemPrompt } from '../../services/api';
 
 interface ChatSidebarProps {
   userId: string;
@@ -34,6 +34,9 @@ interface ChatSidebarProps {
   setModel: (value: string) => void;
   systemPrompt: string;
   setSystemPrompt: (value: string) => void;
+  selectedPromptId: string | null;
+  systemPrompts: SystemPrompt[];
+  isLoadingPrompts: boolean;
   temperature: number;
   setTemperature: (value: number) => void;
   includeThoughts: boolean;
@@ -50,6 +53,10 @@ interface ChatSidebarProps {
   onLoadHistory: () => void;
   onClearScreen: () => void;
   onDeleteHistory: () => void;
+  onSelectPrompt: (promptId: string) => void;
+  onCreatePrompt: (name: string, prompt: string) => Promise<void>;
+  onUpdatePrompt: (id: string, name?: string, prompt?: string) => Promise<void>;
+  onDeletePrompt: (id: string) => Promise<void>;
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -71,6 +78,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   setModel,
   systemPrompt,
   setSystemPrompt,
+  selectedPromptId,
+  systemPrompts,
+  isLoadingPrompts,
   temperature,
   setTemperature,
   includeThoughts,
@@ -85,13 +95,21 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onLoadHistory,
   onClearScreen,
   onDeleteHistory,
+  onSelectPrompt,
+  onCreatePrompt,
+  onUpdatePrompt,
+  onDeletePrompt,
 }) => {
   // Check if current model supports thinking
   const currentModelInfo = availableModels.find(m => m.code === model);
   const supportsThinking = currentModelInfo?.supports_thinking ?? true;
 
-  // System prompt modal state
-  const [showSystemPromptModal, setShowSystemPromptModal] = React.useState(false);
+  // System prompt modals state
+  const [showPromptModal, setShowPromptModal] = React.useState(false);
+  const [showCreateModal, setShowCreateModal] = React.useState(false);
+  const [editingPrompt, setEditingPrompt] = React.useState<SystemPrompt | null>(null);
+  const [newPromptName, setNewPromptName] = React.useState("");
+  const [newPromptText, setNewPromptText] = React.useState("");
 
   return (
     <Card className="flex flex-col h-full">
@@ -199,16 +217,33 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             </Select>
           </div>
 
-          {/* System Prompt - Button to open modal */}
+          {/* System Prompt */}
           <div className="grid grid-cols-[120px_1fr] items-center gap-3">
             <Label className="text-sm">System Prompt</Label>
             <Button
               variant="outline"
               className="h-9 justify-start text-sm"
-              onClick={() => setShowSystemPromptModal(true)}
+              onClick={() => {
+                // Se tem um prompt selecionado, pre-carregar no modal
+                if (selectedPromptId) {
+                  const prompt = systemPrompts.find(p => p.id === selectedPromptId);
+                  if (prompt) {
+                    setEditingPrompt(prompt);
+                    setNewPromptName(prompt.name);
+                    setNewPromptText(prompt.prompt);
+                  }
+                } else {
+                  setEditingPrompt(null);
+                  setNewPromptName("");
+                  setNewPromptText(systemPrompt || "");
+                }
+                setShowPromptModal(true);
+              }}
             >
-              <MessageSquare className="h-4 w-4 mr-2" />
-              Editar
+              <FileText className="h-4 w-4 mr-2" />
+              {selectedPromptId
+                ? systemPrompts.find(p => p.id === selectedPromptId)?.name || "Editar"
+                : "Editar"}
             </Button>
           </div>
 
@@ -278,27 +313,178 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         </div>
 
         {/* System Prompt Modal */}
-        <Dialog open={showSystemPromptModal} onOpenChange={setShowSystemPromptModal}>
+        <Dialog open={showPromptModal} onOpenChange={setShowPromptModal}>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle>System Prompt</DialogTitle>
               <DialogDescription>
-                Instruções de tom e estilo para o modelo
+                Selecione um prompt existente ou crie um novo
               </DialogDescription>
             </DialogHeader>
-            <Textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="You are a helpful assistant."
-              className="min-h-[200px] resize-y font-mono text-sm"
-            />
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowSystemPromptModal(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={() => setShowSystemPromptModal(false)}>
-                Salvar
-              </Button>
+
+            <div className="space-y-4">
+              {/* Select para escolher prompt */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="select-prompt">Selecionar Prompt</Label>
+                  {editingPrompt && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        onSelectPrompt(editingPrompt.id);
+                      }}
+                    >
+                      Aplicar este prompt
+                    </Button>
+                  )}
+                </div>
+                <Select
+                  value={editingPrompt?.id || "new"}
+                  onValueChange={(value) => {
+                    if (value === "new") {
+                      setEditingPrompt(null);
+                      setNewPromptName("");
+                      setNewPromptText("");
+                    } else {
+                      const prompt = systemPrompts.find(p => p.id === value);
+                      if (prompt) {
+                        setEditingPrompt(prompt);
+                        setNewPromptName(prompt.name);
+                        setNewPromptText(prompt.prompt);
+                        // Aplicar automaticamente o prompt selecionado
+                        onSelectPrompt(value);
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger id="select-prompt" className="h-9 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">
+                      <div className="flex items-center gap-2">
+                        <Plus className="h-4 w-4" />
+                        <span>Novo Prompt</span>
+                      </div>
+                    </SelectItem>
+                    {systemPrompts.map((prompt) => (
+                      <SelectItem key={prompt.id} value={prompt.id}>
+                        {prompt.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Separator />
+
+              {/* Nome do prompt */}
+              <div className="space-y-2">
+                <Label htmlFor="prompt-name">Nome</Label>
+                <Input
+                  id="prompt-name"
+                  value={newPromptName}
+                  onChange={(e) => setNewPromptName(e.target.value)}
+                  placeholder="Ex: Code Expert"
+                  className="h-9"
+                />
+              </div>
+
+              {/* Texto do prompt */}
+              <div className="space-y-2">
+                <Label htmlFor="prompt-text">System Prompt</Label>
+                <Textarea
+                  id="prompt-text"
+                  value={newPromptText}
+                  onChange={(e) => setNewPromptText(e.target.value)}
+                  placeholder="You are a helpful assistant."
+                  className="min-h-[200px] resize-y font-mono text-sm"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="flex justify-between items-center">
+              <div className="flex gap-2">
+                {editingPrompt && (
+                  <Button
+                    variant="destructive"
+                    onClick={async () => {
+                      if (editingPrompt) {
+                        await onDeletePrompt(editingPrompt.id);
+                        setShowPromptModal(false);
+                        setEditingPrompt(null);
+                        setNewPromptName("");
+                        setNewPromptText("");
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Deletar
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPromptModal(false);
+                    setEditingPrompt(null);
+                    setNewPromptName("");
+                    setNewPromptText("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                {editingPrompt && (
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      if (!newPromptName.trim() || !newPromptText.trim()) {
+                        return;
+                      }
+
+                      // Salvar como novo (duplicar)
+                      await onCreatePrompt(newPromptName + " (cópia)", newPromptText);
+
+                      setShowPromptModal(false);
+                      setEditingPrompt(null);
+                      setNewPromptName("");
+                      setNewPromptText("");
+                    }}
+                    disabled={!newPromptName.trim() || !newPromptText.trim()}
+                  >
+                    Salvar Como Novo
+                  </Button>
+                )}
+                <Button
+                  onClick={async () => {
+                    if (!newPromptName.trim() || !newPromptText.trim()) {
+                      return;
+                    }
+
+                    if (editingPrompt) {
+                      // Atualizar existente
+                      await onUpdatePrompt(editingPrompt.id, newPromptName, newPromptText);
+                      // Selecionar o prompt atualizado
+                      onSelectPrompt(editingPrompt.id);
+                    } else {
+                      // Criar novo
+                      await onCreatePrompt(newPromptName, newPromptText);
+                      // O onCreatePrompt já seleciona automaticamente no ChatClient
+                    }
+
+                    setShowPromptModal(false);
+                    setEditingPrompt(null);
+                    setNewPromptName("");
+                    setNewPromptText("");
+                  }}
+                  disabled={!newPromptName.trim() || !newPromptText.trim()}
+                >
+                  {editingPrompt ? "Salvar" : "Criar"}
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>

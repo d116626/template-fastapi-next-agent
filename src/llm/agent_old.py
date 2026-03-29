@@ -19,10 +19,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from src.config import env
 from src.utils.log import logger
-
-# Detect memory path dynamically based on this file's location
-MEMORY_PATH = Path(__file__).parent / "memory"
-MEMORY_PATH.mkdir(parents=True, exist_ok=True)
+from src.db.memory import DB_PATH
 
 
 class Agent:
@@ -50,7 +47,7 @@ class Agent:
         self._include_thoughts = include_thoughts
         self._thinking_budget = thinking_budget
         self._setup_complete_async = False
-        self.db_path = db_path or str(MEMORY_PATH / "checkpoint.db")
+        self.db_path = db_path or DB_PATH
 
     def _wrap_tools_with_logging(self, tools: List[BaseTool]) -> List[BaseTool]:
         """Wrap each tool with logging to capture invocations."""

@@ -31,6 +31,28 @@ export interface ModelsListResponse {
   models: ModelInfo[];
 }
 
+export interface SystemPrompt {
+  id: string;
+  name: string;
+  prompt: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SystemPromptsListResponse {
+  prompts: SystemPrompt[];
+}
+
+export interface SystemPromptCreate {
+  name: string;
+  prompt: string;
+}
+
+export interface SystemPromptUpdate {
+  name?: string;
+  prompt?: string;
+}
+
 export interface ToolCall {
   name: string;
   arguments: string;
@@ -75,6 +97,102 @@ export interface DeleteHistoryResponseData {
 }
 
 // --- API Functions ---
+
+// System Prompts
+
+export async function getSystemPrompts(token: string): Promise<SystemPromptsListResponse> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/system-prompts`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch system prompts: ${res.status}`);
+    }
+
+    const data: SystemPromptsListResponse = await res.json();
+    return data;
+
+  } catch (error) {
+    console.error("Error fetching system prompts:", error);
+    throw error;
+  }
+}
+
+export async function createSystemPrompt(token: string, data: SystemPromptCreate): Promise<SystemPrompt> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/system-prompts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Failed to create prompt' }));
+      throw new Error(errorData.detail || `Failed to create prompt: ${res.status}`);
+    }
+
+    const prompt: SystemPrompt = await res.json();
+    return prompt;
+
+  } catch (error) {
+    console.error("Error creating system prompt:", error);
+    throw error;
+  }
+}
+
+export async function updateSystemPrompt(token: string, id: string, data: SystemPromptUpdate): Promise<SystemPrompt> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/system-prompts/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Failed to update prompt' }));
+      throw new Error(errorData.detail || `Failed to update prompt: ${res.status}`);
+    }
+
+    const prompt: SystemPrompt = await res.json();
+    return prompt;
+
+  } catch (error) {
+    console.error("Error updating system prompt:", error);
+    throw error;
+  }
+}
+
+export async function deleteSystemPrompt(token: string, id: string): Promise<void> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/system-prompts/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Failed to delete prompt' }));
+      throw new Error(errorData.detail || `Failed to delete prompt: ${res.status}`);
+    }
+
+  } catch (error) {
+    console.error("Error deleting system prompt:", error);
+    throw error;
+  }
+}
+
+// Models
 
 export async function getAvailableModels(token: string): Promise<ModelsListResponse> {
   try {

@@ -18,6 +18,11 @@ import {
   AgentMessage,
   getAvailableModels,
   ModelInfo,
+  getSystemPrompts,
+  createSystemPrompt,
+  updateSystemPrompt,
+  deleteSystemPrompt,
+  SystemPrompt,
 } from "../services/api";
 import { marked } from "marked";
 import { toast } from "sonner";
@@ -165,7 +170,31 @@ export default function ChatClient() {
       }
     };
 
+    // Buscar system prompts disponíveis
+    const fetchPrompts = async () => {
+      if (!token) return;
+
+      setIsLoadingPrompts(true);
+      try {
+        const response = await getSystemPrompts(token);
+        setSystemPrompts(response.prompts);
+
+        // Set default prompt if available
+        if (response.prompts.length > 0 && !selectedPromptId) {
+          const defaultPrompt = response.prompts.find(p => p.name === "Helpful Assistant") || response.prompts[0];
+          setSelectedPromptId(defaultPrompt.id);
+          setSystemPrompt(defaultPrompt.prompt);
+        }
+      } catch (error) {
+        console.error("Error fetching system prompts:", error);
+        toast.error("Erro ao carregar system prompts");
+      } finally {
+        setIsLoadingPrompts(false);
+      }
+    };
+
     fetchModels();
+    fetchPrompts();
   }, [token]);
 
   // History States
@@ -184,6 +213,7 @@ export default function ChatClient() {
   // Agent Parameters
   const [model, setModel] = useState("gemini-2.5-flash");
   const [systemPrompt, setSystemPrompt] = useState("You are a helpful assistant.");
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [temperature, setTemperature] = useState(0.7);
   const [includeThoughts, setIncludeThoughts] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(-1);
@@ -191,6 +221,10 @@ export default function ChatClient() {
   // Available models
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+
+  // System prompts
+  const [systemPrompts, setSystemPrompts] = useState<SystemPrompt[]>([]);
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -235,6 +269,76 @@ export default function ChatClient() {
   const closeImageModal = () => {
     setImageModalOpen(false);
     setSelectedImage(null);
+  };
+
+  // System prompt handlers
+  const handleCreatePrompt = async (name: string, prompt: string) => {
+    if (!token) return;
+
+    try {
+      const newPrompt = await createSystemPrompt(token, { name, prompt });
+      setSystemPrompts(prev => [newPrompt, ...prev]);
+      setSelectedPromptId(newPrompt.id);
+      setSystemPrompt(newPrompt.prompt);
+      toast.success("System prompt criado com sucesso!");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro ao criar prompt";
+      toast.error(errorMessage);
+      throw error;
+    }
+  };
+
+  const handleUpdatePrompt = async (id: string, name?: string, prompt?: string) => {
+    if (!token) return;
+
+    try {
+      const updatedPrompt = await updateSystemPrompt(token, id, { name, prompt });
+      setSystemPrompts(prev => prev.map(p => p.id === id ? updatedPrompt : p));
+
+      if (selectedPromptId === id && prompt) {
+        setSystemPrompt(prompt);
+      }
+
+      toast.success("System prompt atualizado com sucesso!");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro ao atualizar prompt";
+      toast.error(errorMessage);
+      throw error;
+    }
+  };
+
+  const handleDeletePrompt = async (id: string) => {
+    if (!token) return;
+
+    try {
+      await deleteSystemPrompt(token, id);
+      setSystemPrompts(prev => prev.filter(p => p.id !== id));
+
+      if (selectedPromptId === id) {
+        const remaining = systemPrompts.filter(p => p.id !== id);
+        if (remaining.length > 0) {
+          setSelectedPromptId(remaining[0].id);
+          setSystemPrompt(remaining[0].prompt);
+        } else {
+          setSelectedPromptId(null);
+          setSystemPrompt("You are a helpful assistant.");
+        }
+      }
+
+      toast.success("System prompt deletado com sucesso!");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro ao deletar prompt";
+      toast.error(errorMessage);
+      throw error;
+    }
+  };
+
+  const handleSelectPrompt = (promptId: string) => {
+    const prompt = systemPrompts.find(p => p.id === promptId);
+    if (prompt) {
+      setSelectedPromptId(promptId);
+      setSystemPrompt(prompt.prompt);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1462,6 +1566,9 @@ export default function ChatClient() {
         setModel={setModel}
         systemPrompt={systemPrompt}
         setSystemPrompt={setSystemPrompt}
+        selectedPromptId={selectedPromptId}
+        systemPrompts={systemPrompts}
+        isLoadingPrompts={isLoadingPrompts}
         temperature={temperature}
         setTemperature={setTemperature}
         includeThoughts={includeThoughts}
@@ -1481,6 +1588,10 @@ export default function ChatClient() {
           toast.info("Tela limpa!");
         }}
         onDeleteHistory={handleDeleteHistory}
+        onSelectPrompt={handleSelectPrompt}
+        onCreatePrompt={handleCreatePrompt}
+        onUpdatePrompt={handleUpdatePrompt}
+        onDeletePrompt={handleDeletePrompt}
       />
 
       {/* Image Modal */}
