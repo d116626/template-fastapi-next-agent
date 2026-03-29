@@ -7,8 +7,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock } from 'lucide-react';
-import { HistoryMessage } from '../../services/api';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap } from 'lucide-react';
+import { HistoryMessage, ModelInfo } from '../../services/api';
 
 interface ChatSidebarProps {
   userId: string;
@@ -25,6 +28,20 @@ interface ChatSidebarProps {
   historyError: string | null;
   showDeleteModal: boolean;
   setShowDeleteModal: (value: boolean) => void;
+
+  // Agent configuration
+  model: string;
+  setModel: (value: string) => void;
+  systemPrompt: string;
+  setSystemPrompt: (value: string) => void;
+  temperature: number;
+  setTemperature: (value: number) => void;
+  includeThoughts: boolean;
+  setIncludeThoughts: (value: boolean) => void;
+  thinkingBudget: number;
+  setThinkingBudget: (value: number) => void;
+  availableModels: ModelInfo[];
+  isLoadingModels: boolean;
 
   // Handlers
   onGenerateNumber: () => void;
@@ -50,6 +67,18 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   historyError,
   showDeleteModal,
   setShowDeleteModal,
+  model,
+  setModel,
+  systemPrompt,
+  setSystemPrompt,
+  temperature,
+  setTemperature,
+  includeThoughts,
+  setIncludeThoughts,
+  thinkingBudget,
+  setThinkingBudget,
+  availableModels,
+  isLoadingModels,
   onGenerateNumber,
   onToggleFixNumber,
   onCopyNumber,
@@ -57,6 +86,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onClearScreen,
   onDeleteHistory,
 }) => {
+  // Check if current model supports thinking
+  const currentModelInfo = availableModels.find(m => m.code === model);
+  const supportsThinking = currentModelInfo?.supports_thinking ?? true;
+
+  // System prompt modal state
+  const [showSystemPromptModal, setShowSystemPromptModal] = React.useState(false);
+
   return (
     <Card className="flex flex-col h-full">
       <CardHeader>
@@ -64,14 +100,14 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
       </CardHeader>
       <CardContent className="flex-1 overflow-y-auto space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="user-id">User ID</Label>
-          <div className="flex items-center space-x-2">
+          <Label htmlFor="user-id" className="text-sm">User ID</Label>
+          <div className="flex items-center gap-2">
             <Input
               id="user-id"
               value={isMounted ? userId : ''}
               onChange={(e) => !isUserIdFixed && setUserId(e.target.value)}
               disabled={isUserIdFixed}
-              className="flex-1"
+              className="flex-1 h-9"
             />
             <TooltipProvider>
               <Tooltip>
@@ -81,6 +117,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     size="icon"
                     onClick={onGenerateNumber}
                     disabled={isUserIdFixed || !isMounted}
+                    className="h-9 w-9"
                   >
                     <RefreshCw className="h-4 w-4" />
                   </Button>
@@ -93,11 +130,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    size="icon" 
+                  <Button
+                    variant="outline"
+                    size="icon"
                     onClick={onToggleFixNumber}
                     disabled={!isMounted}
+                    className="h-9 w-9"
                   >
                     {isUserIdFixed ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
                   </Button>
@@ -110,11 +148,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    size="icon" 
+                  <Button
+                    variant="outline"
+                    size="icon"
                     onClick={onCopyNumber}
                     disabled={!isMounted}
+                    className="h-9 w-9"
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -127,16 +166,154 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
           </div>
         </div>
 
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Settings className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold text-lg">Configurações do Agente</h3>
+          </div>
+
+          {/* Modelo */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label htmlFor="model" className="text-sm">Modelo</Label>
+            <Select value={model} onValueChange={setModel} disabled={isLoadingModels}>
+              <SelectTrigger id="model" className="h-9 w-full">
+                <SelectValue placeholder={isLoadingModels ? "Carregando..." : "Selecione"}>
+                  {currentModelInfo && (
+                    <span className="text-sm truncate">{currentModelInfo.name}</span>
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {availableModels.map((m) => (
+                  <SelectItem key={m.code} value={m.code} className="py-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-semibold">{m.name}</span>
+                      <span className="text-xs text-muted-foreground font-mono">{m.code}</span>
+                      <span className="text-xs text-muted-foreground mt-1">
+                        {m.description}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* System Prompt - Button to open modal */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label className="text-sm">System Prompt</Label>
+            <Button
+              variant="outline"
+              className="h-9 justify-start text-sm"
+              onClick={() => setShowSystemPromptModal(true)}
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Editar
+            </Button>
+          </div>
+
+          {/* Temperature */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label htmlFor="temperature" className="text-sm">Temperature</Label>
+            <div className="flex items-center gap-3">
+              <Slider
+                id="temperature"
+                value={[temperature]}
+                onValueChange={(values) => setTemperature(values[0])}
+                min={0}
+                max={1}
+                step={0.1}
+                className="flex-1 max-w-[120px]"
+              />
+              <Input
+                type="number"
+                value={temperature.toFixed(1)}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val >= 0 && val <= 1) {
+                    setTemperature(val);
+                  }
+                }}
+                min={0}
+                max={1}
+                step={0.1}
+                className="w-16 h-9 text-center text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Thinking Level */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label htmlFor="thinking-level" className="text-sm">Thinking Level</Label>
+            <Select
+              value={
+                thinkingBudget === -1 ? "high" :
+                thinkingBudget === 10000 ? "medium" :
+                thinkingBudget === 1000 ? "low" :
+                "disabled"
+              }
+              onValueChange={(value) => {
+                const budgetMap: Record<string, number> = {
+                  high: -1,
+                  medium: 10000,
+                  low: 1000,
+                  disabled: 0,
+                };
+                setThinkingBudget(budgetMap[value]);
+                setIncludeThoughts(value !== "disabled");
+              }}
+              disabled={!supportsThinking}
+            >
+              <SelectTrigger id="thinking-level" className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* System Prompt Modal */}
+        <Dialog open={showSystemPromptModal} onOpenChange={setShowSystemPromptModal}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>System Prompt</DialogTitle>
+              <DialogDescription>
+                Instruções de tom e estilo para o modelo
+              </DialogDescription>
+            </DialogHeader>
+            <Textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a helpful assistant."
+              className="min-h-[200px] resize-y font-mono text-sm"
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowSystemPromptModal(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => setShowSystemPromptModal(false)}>
+                Salvar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Separator className="my-4" />
 
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold text-sm">Histórico</h3>
+            <History className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold text-lg">Histórico</h3>
           </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="session-timeout">Session Timeout (segundos)</Label>
+
+          {/* Session Timeout */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label htmlFor="session-timeout" className="text-sm">Session Timeout</Label>
             <Input
               id="session-timeout"
               type="number"
@@ -145,28 +322,30 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               min="60"
               max="86400"
               placeholder="3600"
+              className="h-9"
             />
-            <p className="text-xs text-muted-foreground">
-              Tempo limite para agrupar mensagens na mesma sessão
-            </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="whatsapp-format"
-              checked={useWhatsappFormat}
-              onCheckedChange={(checked) => setUseWhatsappFormat(checked as boolean)}
-            />
-            <Label htmlFor="whatsapp-format" className="text-sm">
-              Formato WhatsApp
-            </Label>
+          {/* WhatsApp Format */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label className="text-sm">Formato</Label>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="whatsapp-format"
+                checked={useWhatsappFormat}
+                onCheckedChange={(checked) => setUseWhatsappFormat(checked as boolean)}
+              />
+              <Label htmlFor="whatsapp-format" className="text-sm cursor-pointer">
+                WhatsApp
+              </Label>
+            </div>
           </div>
 
           <div className="space-y-2">
             <Button
               onClick={onLoadHistory}
               disabled={isLoadingHistory || !isMounted}
-              className="w-full"
+              className="w-full h-9"
               variant="outline"
             >
               {isLoadingHistory ? (
@@ -185,7 +364,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <Button
               onClick={onClearScreen}
               disabled={!isMounted}
-              className="w-full"
+              className="w-full h-9"
               variant="outline"
             >
               <Eraser className="h-4 w-4 mr-2" />
@@ -196,7 +375,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               <DialogTrigger asChild>
                 <Button
                   disabled={isDeletingHistory || isLoadingHistory || !isMounted}
-                  className="w-full"
+                  className="w-full h-9"
                   variant="destructive"
                 >
                   {isDeletingHistory ? (

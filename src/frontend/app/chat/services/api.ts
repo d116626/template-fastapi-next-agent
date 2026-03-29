@@ -8,8 +8,27 @@ export interface ChatRequestPayload {
   user_id: string;
   message: string;
   system_prompt?: string;
+  model?: string;
+  temperature?: number;
+  include_thoughts?: boolean;
+  thinking_budget?: number;
   session_timeout_seconds?: number;
   use_whatsapp_format?: boolean;
+}
+
+export interface ModelInfo {
+  code: string;
+  name: string;
+  description: string;
+  supports_thinking: boolean;
+  supports_images: boolean;
+  supports_function_calling: boolean;
+  input_token_limit: number;
+  output_token_limit: number;
+}
+
+export interface ModelsListResponse {
+  models: ModelInfo[];
 }
 
 export interface ToolCall {
@@ -57,6 +76,28 @@ export interface DeleteHistoryResponseData {
 
 // --- API Functions ---
 
+export async function getAvailableModels(token: string): Promise<ModelsListResponse> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/chat/models`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch models: ${res.status}`);
+    }
+
+    const data: ModelsListResponse = await res.json();
+    return data;
+
+  } catch (error) {
+    console.error("Error fetching models:", error);
+    throw error;
+  }
+}
+
 export async function sendChatMessage(
   payload: ChatRequestPayload,
   token: string,
@@ -73,6 +114,22 @@ export async function sendChatMessage(
 
     if (payload.system_prompt) {
       formData.append('system_prompt', payload.system_prompt);
+    }
+
+    if (payload.model) {
+      formData.append('model', payload.model);
+    }
+
+    if (payload.temperature !== undefined) {
+      formData.append('temperature', payload.temperature.toString());
+    }
+
+    if (payload.include_thoughts !== undefined) {
+      formData.append('include_thoughts', payload.include_thoughts.toString());
+    }
+
+    if (payload.thinking_budget !== undefined) {
+      formData.append('thinking_budget', payload.thinking_budget.toString());
     }
 
     if (payload.session_timeout_seconds !== undefined) {

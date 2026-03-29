@@ -16,6 +16,8 @@ import {
   HistoryMessage,
   deleteUserHistory,
   AgentMessage,
+  getAvailableModels,
+  ModelInfo,
 } from "../services/api";
 import { marked } from "marked";
 import { toast } from "sonner";
@@ -146,7 +148,25 @@ export default function ChatClient() {
     // Recupera o estado do cadeado do localStorage
     const savedFixed = localStorage.getItem("chat-user-id-fixed") === "true";
     setIsUserIdFixed(savedFixed);
-  }, []);
+
+    // Buscar modelos disponíveis
+    const fetchModels = async () => {
+      if (!token) return;
+
+      setIsLoadingModels(true);
+      try {
+        const response = await getAvailableModels(token);
+        setAvailableModels(response.models);
+      } catch (error) {
+        console.error("Error fetching models:", error);
+        toast.error("Erro ao carregar modelos disponíveis");
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    fetchModels();
+  }, [token]);
 
   // History States
   const [historyMessages, setHistoryMessages] = useState<HistoryMessage[]>(
@@ -160,6 +180,17 @@ export default function ChatClient() {
   // History Parameters
   const [sessionTimeoutSeconds, setSessionTimeoutSeconds] = useState(3600); // 1 hora default
   const [useWhatsappFormat, setUseWhatsappFormat] = useState(false);
+
+  // Agent Parameters
+  const [model, setModel] = useState("gemini-2.5-flash");
+  const [systemPrompt, setSystemPrompt] = useState("You are a helpful assistant.");
+  const [temperature, setTemperature] = useState(0.7);
+  const [includeThoughts, setIncludeThoughts] = useState(true);
+  const [thinkingBudget, setThinkingBudget] = useState(-1);
+
+  // Available models
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -280,6 +311,11 @@ export default function ChatClient() {
       const payload: ChatRequestPayload = {
         user_id: userId,
         message: currentInput,
+        system_prompt: systemPrompt,
+        model: model,
+        temperature: temperature,
+        include_thoughts: includeThoughts,
+        thinking_budget: thinkingBudget,
         session_timeout_seconds: sessionTimeoutSeconds,
         use_whatsapp_format: useWhatsappFormat,
       };
@@ -1422,6 +1458,18 @@ export default function ChatClient() {
         historyError={historyError}
         showDeleteModal={showDeleteModal}
         setShowDeleteModal={setShowDeleteModal}
+        model={model}
+        setModel={setModel}
+        systemPrompt={systemPrompt}
+        setSystemPrompt={setSystemPrompt}
+        temperature={temperature}
+        setTemperature={setTemperature}
+        includeThoughts={includeThoughts}
+        setIncludeThoughts={setIncludeThoughts}
+        thinkingBudget={thinkingBudget}
+        setThinkingBudget={setThinkingBudget}
+        availableModels={availableModels}
+        isLoadingModels={isLoadingModels}
         onGenerateNumber={handleGenerateNumber}
         onToggleFixNumber={handleToggleFixNumber}
         onCopyNumber={handleCopyNumber}

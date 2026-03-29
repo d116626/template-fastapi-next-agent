@@ -14,6 +14,7 @@ from src.llm.history import (
     delete_thread_history,
 )
 from src.utils.file_processor import FileProcessor
+from src.config.models import get_available_models, model_supports_thinking
 
 router = APIRouter(
     prefix="/chat",
@@ -53,17 +54,80 @@ class ChatResponse(BaseModel):
     messages: List[dict]
 
 
-def get_or_create_agent(user_id: str, system_prompt: str) -> Agent:
+class ModelInfoResponse(BaseModel):
+    code: str
+    name: str
+    description: str
+    supports_thinking: bool
+    supports_images: bool
+    supports_function_calling: bool
+    input_token_limit: int
+    output_token_limit: int
+
+
+class ModelsListResponse(BaseModel):
+    models: List[ModelInfoResponse]
+
+
+def get_or_create_agent(
+    user_id: str,
+    system_prompt: str,
+    model: str = "gemini-2.5-flash",
+    temperature: float = 0.7,
+    include_thoughts: bool = True,
+    thinking_budget: int = -1,
+) -> Agent:
     """Get existing agent or create new one for user."""
+    # Check if agent exists with different config - recreate if needed
+    if user_id in agents:
+        old_agent = agents[user_id]
+        # Check if config changed
+        if (
+            old_agent._model != model
+            or old_agent._temperature != temperature
+            or old_agent._include_thoughts != include_thoughts
+            or old_agent._thinking_budget != thinking_budget
+        ):
+            logger.info(
+                f"[Chat API] Agent config changed for user {user_id}, recreating..."
+            )
+            # Cleanup old agent
+            import asyncio
+
+            try:
+                asyncio.create_task(old_agent.async_cleanup())
+            except:
+                pass
+            del agents[user_id]
+
     if user_id not in agents:
-        logger.info(f"[Chat API] Creating new agent for user: {user_id}")
+        logger.info(
+            f"[Chat API] Creating new agent for user: {user_id} "
+            f"(model={model}, temp={temperature}, thoughts={include_thoughts}, budget={thinking_budget})"
+        )
         agents[user_id] = Agent(
+            model=model,
             system_prompt=system_prompt,
             tools=TOOLS,
-            include_thoughts=True,
-            thinking_budget=-1,
+            temperature=temperature,
+            include_thoughts=include_thoughts,
+            thinking_budget=thinking_budget,
         )
     return agents[user_id]
+
+
+@router.get("/models", response_model=ModelsListResponse)
+async def list_models():
+    """
+    Get list of available models with their capabilities.
+
+    Returns information about each model including:
+    - Model code and name
+    - Supported features (thinking, images, function calling)
+    - Token limits
+    """
+    models = get_available_models()
+    return ModelsListResponse(models=models)
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -71,6 +135,10 @@ async def send_message(
     message: str = Form(...),
     user_id: str = Form(...),
     system_prompt: str = Form("You are a helpful assistant."),
+    model: str = Form("gemini-2.5-flash"),
+    temperature: float = Form(0.7),
+    include_thoughts: bool = Form(True),
+    thinking_budget: int = Form(-1),
     session_timeout_seconds: Optional[int] = Form(None),
     use_whatsapp_format: bool = Form(True),
     files: List[UploadFile] = File(default=[]),
@@ -82,6 +150,10 @@ async def send_message(
     - **message**: The user's message
     - **user_id**: Unique identifier for the user
     - **system_prompt**: Optional system prompt for the agent (default: "You are a helpful assistant.")
+    - **model**: Model to use (default: "gemini-2.5-flash")
+    - **temperature**: Temperature for generation (default: 0.7, range: 0.0-1.0)
+    - **include_thoughts**: Include model thinking process (default: True)
+    - **thinking_budget**: Thinking budget tokens (-1 = unlimited, 0 = disabled, >0 = specific limit)
     - **session_timeout_seconds**: Optional session timeout in seconds
     - **use_whatsapp_format**: Whether to use WhatsApp format (default: True)
     - **files**: Optional list of files to upload (images, PDFs, code, documents)
@@ -92,8 +164,26 @@ async def send_message(
             f"[Chat API] Received message from user {user_id} with {file_count} file(s)"
         )
 
+        # Validate thinking_budget for models that don't support thinking
+        if not model_supports_thinking(model) and (
+            include_thoughts or thinking_budget != 0
+        ):
+            logger.warning(
+                f"[Chat API] Model {model} does not support thinking, "
+                f"disabling thinking features"
+            )
+            include_thoughts = False
+            thinking_budget = 0
+
         # Get or create agent for this user
-        agent = get_or_create_agent(user_id, system_prompt)
+        agent = get_or_create_agent(
+            user_id=user_id,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            include_thoughts=include_thoughts,
+            thinking_budget=thinking_budget,
+        )
 
         # Process files if provided
         content: Union[str, List[Dict]]
