@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap, Plus, Edit, FileText, Download } from 'lucide-react';
+import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap, Plus, Edit, FileText, Download, Upload } from 'lucide-react';
 import { HistoryMessage, ModelInfo, SystemPrompt } from '../../services/api';
 
 interface ChatSidebarProps {
@@ -60,6 +60,8 @@ interface ChatSidebarProps {
   onUpdatePrompt: (id: string, name?: string, prompt?: string) => Promise<void>;
   onDeletePrompt: (id: string) => Promise<void>;
   onExportConversation: (format: 'markdown' | 'json' | 'text') => void;
+  onExportConfig: () => void;
+  onImportConfig: () => void;
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -105,6 +107,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onUpdatePrompt,
   onDeletePrompt,
   onExportConversation,
+  onExportConfig,
+  onImportConfig,
 }) => {
   // Check if current model supports thinking
   const currentModelInfo = availableModels.find(m => m.code === model);
@@ -333,6 +337,33 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Config Export/Import */}
+          <div className="space-y-2 pt-4 border-t">
+            <Label className="text-sm font-medium">Configurações</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={onExportConfig}
+                disabled={!isMounted}
+                className="h-9 text-xs"
+                variant="outline"
+                title="Exportar configurações do agente"
+              >
+                <Download className="h-3 w-3 mr-1" />
+                Exportar
+              </Button>
+              <Button
+                onClick={onImportConfig}
+                disabled={!isMounted}
+                className="h-9 text-xs"
+                variant="outline"
+                title="Importar configurações do agente"
+              >
+                <Upload className="h-3 w-3 mr-1" />
+                Importar
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* System Prompt Modal */}
@@ -348,29 +379,26 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <div className="space-y-4">
               {/* Select para escolher prompt */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="select-prompt">Selecionar Prompt</Label>
-                  {editingPrompt && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        onSelectPrompt(editingPrompt.id);
-                      }}
-                    >
-                      Aplicar este prompt
-                    </Button>
-                  )}
-                </div>
-                <Select
-                  value={editingPrompt?.id || "new"}
-                  onValueChange={(value) => {
-                    if (value === "new") {
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
                       setEditingPrompt(null);
                       setNewPromptName("");
                       setNewPromptText("");
-                    } else {
+                    }}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Novo Prompt
+                  </Button>
+                </div>
+                <Select
+                  value={editingPrompt?.id || ""}
+                  onValueChange={(value) => {
+                    if (value) {
                       const prompt = systemPrompts.find(p => p.id === value);
                       if (prompt) {
                         setEditingPrompt(prompt);
@@ -383,15 +411,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   }}
                 >
                   <SelectTrigger id="select-prompt" className="h-9 w-full">
-                    <SelectValue />
+                    <SelectValue placeholder="Escolha um prompt existente" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new">
-                      <div className="flex items-center gap-2">
-                        <Plus className="h-4 w-4" />
-                        <span>Novo Prompt</span>
-                      </div>
-                    </SelectItem>
                     {systemPrompts.map((prompt) => (
                       <SelectItem key={prompt.id} value={prompt.id}>
                         {prompt.name}
@@ -582,43 +604,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               Limpar Tela
             </Button>
 
-            {/* Export buttons */}
-            <div className="space-y-2 pt-2 border-t">
-              <Label className="text-sm font-medium">Exportar Conversa</Label>
-              <div className="grid grid-cols-3 gap-2">
-                <Button
-                  onClick={() => onExportConversation('markdown')}
-                  disabled={!isMounted}
-                  className="h-9 text-xs"
-                  variant="outline"
-                  title="Exportar como Markdown"
-                >
-                  <Download className="h-3 w-3 mr-1" />
-                  MD
-                </Button>
-                <Button
-                  onClick={() => onExportConversation('json')}
-                  disabled={!isMounted}
-                  className="h-9 text-xs"
-                  variant="outline"
-                  title="Exportar como JSON"
-                >
-                  <Download className="h-3 w-3 mr-1" />
-                  JSON
-                </Button>
-                <Button
-                  onClick={() => onExportConversation('text')}
-                  disabled={!isMounted}
-                  className="h-9 text-xs"
-                  variant="outline"
-                  title="Exportar como Texto"
-                >
-                  <Download className="h-3 w-3 mr-1" />
-                  TXT
-                </Button>
-              </div>
-            </div>
-
             <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
               <DialogTrigger asChild>
                 <Button
@@ -649,7 +634,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   Tem certeza que deseja deletar <strong>PERMANENTEMENTE</strong> todo o histórico do usuário <code className="bg-muted px-1 py-0.5 rounded text-sm font-mono">{userId}</code>?
                 </DialogDescription>
               </DialogHeader>
-              
+
               <div className="py-4">
                 <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                   <div className="text-destructive mt-0.5">⚠️</div>
@@ -692,6 +677,43 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               </DialogFooter>
             </DialogContent>
             </Dialog>
+
+            {/* Export buttons */}
+            <div className="space-y-2 pt-2 border-t">
+              <Label className="text-sm font-medium">Exportar Conversa</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  onClick={() => onExportConversation('markdown')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como Markdown"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  MD
+                </Button>
+                <Button
+                  onClick={() => onExportConversation('json')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como JSON"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  JSON
+                </Button>
+                <Button
+                  onClick={() => onExportConversation('text')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como Texto"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  TXT
+                </Button>
+              </div>
+            </div>
           </div>
 
           {historyError && (

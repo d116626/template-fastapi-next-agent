@@ -277,6 +277,45 @@ export default function ChatClient() {
     }
   }, [isUserIdFixed]);
 
+  // Carregar configurações do localStorage no mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedModel = localStorage.getItem("agent-config-model");
+      const savedTemperature = localStorage.getItem("agent-config-temperature");
+      const savedIncludeThoughts = localStorage.getItem("agent-config-include-thoughts");
+      const savedThinkingBudget = localStorage.getItem("agent-config-thinking-budget");
+      const savedResponseMode = localStorage.getItem("agent-config-response-mode");
+      const savedSessionTimeout = localStorage.getItem("agent-config-session-timeout");
+      const savedWhatsappFormat = localStorage.getItem("agent-config-whatsapp-format");
+      const savedSelectedPromptId = localStorage.getItem("agent-config-selected-prompt-id");
+
+      if (savedModel) setModel(savedModel);
+      if (savedTemperature) setTemperature(parseFloat(savedTemperature));
+      if (savedIncludeThoughts) setIncludeThoughts(savedIncludeThoughts === "true");
+      if (savedThinkingBudget) setThinkingBudget(parseInt(savedThinkingBudget));
+      if (savedResponseMode) setResponseMode(savedResponseMode as 'normal' | 'stream');
+      if (savedSessionTimeout) setSessionTimeoutSeconds(parseInt(savedSessionTimeout));
+      if (savedWhatsappFormat) setUseWhatsappFormat(savedWhatsappFormat === "true");
+      if (savedSelectedPromptId) setSelectedPromptId(savedSelectedPromptId);
+    }
+  }, []);
+
+  // Salvar configurações do agente no localStorage quando mudarem
+  useEffect(() => {
+    if (typeof window !== "undefined" && isMounted) {
+      localStorage.setItem("agent-config-model", model);
+      localStorage.setItem("agent-config-temperature", temperature.toString());
+      localStorage.setItem("agent-config-include-thoughts", includeThoughts.toString());
+      localStorage.setItem("agent-config-thinking-budget", thinkingBudget.toString());
+      localStorage.setItem("agent-config-response-mode", responseMode);
+      localStorage.setItem("agent-config-session-timeout", sessionTimeoutSeconds.toString());
+      localStorage.setItem("agent-config-whatsapp-format", useWhatsappFormat.toString());
+      if (selectedPromptId) {
+        localStorage.setItem("agent-config-selected-prompt-id", selectedPromptId);
+      }
+    }
+  }, [model, temperature, includeThoughts, thinkingBudget, responseMode, sessionTimeoutSeconds, useWhatsappFormat, selectedPromptId, isMounted]);
+
   const [requestStartTime, setRequestStartTime] = useState<number | null>(
     null
   );
@@ -376,15 +415,26 @@ export default function ChatClient() {
   const handleExportConversation = (format: 'markdown' | 'json' | 'text') => {
     const { exportConversation } = require('../utils/export');
 
-    // Combinar histórico e mensagens atuais
+    // Combinar histórico e mensagens atuais - incluindo TODOS os tipos de mensagens
     const historyMessagesFormatted: DisplayMessage[] = historyMessages
-      .filter(msg => msg.message_type === 'user_message' || msg.message_type === 'assistant_message')
-      .map(msg => ({
-        sender: msg.message_type === 'user_message' ? 'user' : 'bot',
-        content: msg.content || '',
-        timestamp: msg.date,
-        latency: undefined,
-      }));
+      .map(msg => {
+        const isUserMsg = msg.message_type === 'user_message';
+        const isAssistantMsg = msg.message_type === 'assistant_message';
+        const isReasoning = msg.message_type === 'reasoning_message';
+        const isToolCall = msg.message_type === 'tool_call_message';
+        const isToolReturn = msg.message_type === 'tool_return_message';
+
+        return {
+          sender: isUserMsg ? 'user' as const : 'bot' as const,
+          content: msg.content || '',
+          timestamp: msg.date,
+          latency: undefined,
+          messageType: msg.message_type,
+          reasoning: isReasoning ? msg.reasoning : undefined,
+          toolCall: isToolCall ? msg.tool_call : undefined,
+          toolReturn: isToolReturn ? msg.tool_return : undefined,
+        };
+      });
 
     const allMessages = [...historyMessagesFormatted, ...messages];
 
@@ -395,6 +445,65 @@ export default function ChatClient() {
 
     exportConversation(allMessages, userId, format);
     toast.success(`Conversa exportada como ${format.toUpperCase()}!`);
+  };
+
+  const handleExportConfig = () => {
+    const config = {
+      model,
+      temperature,
+      includeThoughts,
+      thinkingBudget,
+      responseMode,
+      sessionTimeoutSeconds,
+      useWhatsappFormat,
+      selectedPromptId,
+      systemPrompt,
+    };
+
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agent-config-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast.success('Configurações exportadas!');
+  };
+
+  const handleImportConfig = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = async (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const file = target.files?.[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const config = JSON.parse(text);
+
+        // Apply configurations
+        if (config.model) setModel(config.model);
+        if (config.temperature !== undefined) setTemperature(config.temperature);
+        if (config.includeThoughts !== undefined) setIncludeThoughts(config.includeThoughts);
+        if (config.thinkingBudget !== undefined) setThinkingBudget(config.thinkingBudget);
+        if (config.responseMode) setResponseMode(config.responseMode);
+        if (config.sessionTimeoutSeconds !== undefined) setSessionTimeoutSeconds(config.sessionTimeoutSeconds);
+        if (config.useWhatsappFormat !== undefined) setUseWhatsappFormat(config.useWhatsappFormat);
+        if (config.selectedPromptId) setSelectedPromptId(config.selectedPromptId);
+        if (config.systemPrompt) setSystemPrompt(config.systemPrompt);
+
+        toast.success('Configurações importadas com sucesso!');
+      } catch (error) {
+        console.error('Error importing config:', error);
+        toast.error('Erro ao importar configurações. Verifique se o arquivo é válido.');
+      }
+    };
+    input.click();
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1816,6 +1925,8 @@ export default function ChatClient() {
         onUpdatePrompt={handleUpdatePrompt}
         onDeletePrompt={handleDeletePrompt}
         onExportConversation={handleExportConversation}
+        onExportConfig={handleExportConfig}
+        onImportConfig={handleImportConfig}
       />
 
       {/* Image Modal */}

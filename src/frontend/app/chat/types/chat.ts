@@ -24,6 +24,11 @@ export interface DisplayMessage {
   isStreaming?: boolean;
   streamingThinking?: string;
   thinkingExpanded?: boolean; // Track if user expanded thinking accordion
+  // For export purposes - preserve message type and tool data
+  messageType?: 'user_message' | 'assistant_message' | 'reasoning_message' | 'tool_call_message' | 'tool_return_message';
+  reasoning?: string;
+  toolCall?: { name: string; arguments: string };
+  toolReturn?: any;
 }
 
 export interface InstrucaoItem {

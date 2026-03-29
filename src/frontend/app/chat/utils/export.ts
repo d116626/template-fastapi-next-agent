@@ -29,8 +29,17 @@ export function exportToMarkdown(messages: DisplayMessage[], userId: string): st
   markdown += `---\n\n`;
 
   messages.forEach((msg, index) => {
-    const sender = msg.sender === 'user' ? '👤 Usuário' : '🤖 Assistente';
-    const text = extractText(msg.content);
+    // Determine sender based on message type
+    let sender = '🤖 Assistente';
+    if (msg.messageType === 'user_message' || msg.sender === 'user') {
+      sender = '👤 Usuário';
+    } else if (msg.messageType === 'reasoning_message') {
+      sender = '💡 Pensamento';
+    } else if (msg.messageType === 'tool_call_message') {
+      sender = '🔧 Chamada de Ferramenta';
+    } else if (msg.messageType === 'tool_return_message') {
+      sender = '↩️ Retorno de Ferramenta';
+    }
 
     markdown += `## ${sender}\n\n`;
 
@@ -39,7 +48,36 @@ export function exportToMarkdown(messages: DisplayMessage[], userId: string): st
       markdown += `*${msgTime}*\n\n`;
     }
 
-    markdown += `${text}\n\n`;
+    // Render reasoning
+    if (msg.reasoning) {
+      markdown += `**Raciocínio:**\n\n`;
+      markdown += `\`\`\`\n${msg.reasoning}\n\`\`\`\n\n`;
+    }
+
+    // Render tool call
+    if (msg.toolCall) {
+      markdown += `**Ferramenta:** \`${msg.toolCall.name}\`\n\n`;
+      markdown += `**Argumentos:**\n\n`;
+      const argsText = typeof msg.toolCall.arguments === 'string'
+        ? msg.toolCall.arguments
+        : JSON.stringify(msg.toolCall.arguments, null, 2);
+      markdown += `\`\`\`json\n${argsText}\n\`\`\`\n\n`;
+    }
+
+    // Render tool return
+    if (msg.toolReturn) {
+      markdown += `**Retorno:**\n\n`;
+      const returnText = typeof msg.toolReturn === 'string'
+        ? msg.toolReturn
+        : JSON.stringify(msg.toolReturn, null, 2);
+      markdown += `\`\`\`\n${returnText}\n\`\`\`\n\n`;
+    }
+
+    // Render main content
+    const text = extractText(msg.content);
+    if (text) {
+      markdown += `${text}\n\n`;
+    }
 
     if (msg.latency) {
       markdown += `*Tempo de resposta: ${msg.latency.toFixed(2)}s*\n\n`;
@@ -61,9 +99,13 @@ export function exportToJSON(messages: DisplayMessage[], userId: string): string
     messageCount: messages.length,
     messages: messages.map(msg => ({
       sender: msg.sender,
+      messageType: msg.messageType || (msg.sender === 'user' ? 'user_message' : 'assistant_message'),
       content: extractText(msg.content),
       timestamp: msg.timestamp,
       latency: msg.latency,
+      reasoning: msg.reasoning,
+      toolCall: msg.toolCall,
+      toolReturn: msg.toolReturn,
     })),
   };
 
@@ -81,8 +123,17 @@ export function exportToText(messages: DisplayMessage[], userId: string): string
   text += `${'='.repeat(60)}\n\n`;
 
   messages.forEach((msg, index) => {
-    const sender = msg.sender === 'user' ? 'Usuário' : 'Assistente';
-    const content = extractText(msg.content);
+    // Determine sender based on message type
+    let sender = 'Assistente';
+    if (msg.messageType === 'user_message' || msg.sender === 'user') {
+      sender = 'Usuário';
+    } else if (msg.messageType === 'reasoning_message') {
+      sender = 'Pensamento';
+    } else if (msg.messageType === 'tool_call_message') {
+      sender = 'Chamada de Ferramenta';
+    } else if (msg.messageType === 'tool_return_message') {
+      sender = 'Retorno de Ferramenta';
+    }
 
     text += `[${sender}]\n`;
 
@@ -91,13 +142,39 @@ export function exportToText(messages: DisplayMessage[], userId: string): string
       text += `${msgTime}\n`;
     }
 
-    text += `\n${content}\n\n`;
-
-    if (msg.latency) {
-      text += `(Tempo de resposta: ${msg.latency.toFixed(2)}s)\n`;
+    // Render reasoning
+    if (msg.reasoning) {
+      text += `\nRaciocínio:\n${msg.reasoning}\n`;
     }
 
-    text += `${'-'.repeat(60)}\n\n`;
+    // Render tool call
+    if (msg.toolCall) {
+      text += `\nFerramenta: ${msg.toolCall.name}\n`;
+      const argsText = typeof msg.toolCall.arguments === 'string'
+        ? msg.toolCall.arguments
+        : JSON.stringify(msg.toolCall.arguments, null, 2);
+      text += `Argumentos:\n${argsText}\n`;
+    }
+
+    // Render tool return
+    if (msg.toolReturn) {
+      const returnText = typeof msg.toolReturn === 'string'
+        ? msg.toolReturn
+        : JSON.stringify(msg.toolReturn, null, 2);
+      text += `\nRetorno:\n${returnText}\n`;
+    }
+
+    // Render main content
+    const content = extractText(msg.content);
+    if (content) {
+      text += `\n${content}\n`;
+    }
+
+    if (msg.latency) {
+      text += `\n(Tempo de resposta: ${msg.latency.toFixed(2)}s)\n`;
+    }
+
+    text += `\n${'-'.repeat(60)}\n\n`;
   });
 
   return text;
