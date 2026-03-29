@@ -328,17 +328,19 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
           {/* WhatsApp Format */}
           <div className="grid grid-cols-[120px_1fr] items-center gap-3">
-            <Label className="text-sm">Formato</Label>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="whatsapp-format"
-                checked={useWhatsappFormat}
-                onCheckedChange={(checked) => setUseWhatsappFormat(checked as boolean)}
-              />
-              <Label htmlFor="whatsapp-format" className="text-sm cursor-pointer">
-                WhatsApp
-              </Label>
-            </div>
+            <Label htmlFor="whatsapp-format" className="text-sm">Formato WhatsApp</Label>
+            <Select
+              value={useWhatsappFormat ? "enabled" : "disabled"}
+              onValueChange={(value) => setUseWhatsappFormat(value === "enabled")}
+            >
+              <SelectTrigger id="whatsapp-format" className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="enabled">Enabled</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
