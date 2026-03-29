@@ -20,13 +20,15 @@ import {
 import { marked } from "marked";
 import { toast } from "sonner";
 
-import { DisplayMessage } from "../types/chat";
+import { DisplayMessage, MultimodalContent, MultimodalContentItem } from "../types/chat";
 
 // Modules
 import ChatSidebar from "./modules/ChatSidebar";
 import ChatInput from "./modules/ChatInput";
 import JsonViewer from "./modules/JsonViewer";
 import ToolReturnViewer from "./modules/ToolReturnViewer";
+import { AttachedFile } from "./modules/FileUpload";
+import ImageModal from "./modules/ImageModal";
 import {
   Bot,
   User,
@@ -38,6 +40,7 @@ import {
   LogIn,
   Clock,
   ShieldAlert,
+  FileText,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -83,8 +86,23 @@ const generateRandomNumber = (): string => {
   return Math.floor(100000000 + Math.random() * 900000000).toString();
 };
 
-const copyToClipboard = async (text: string) => {
+const extractTextFromContent = (content: MultimodalContent | null | undefined): string => {
+  if (!content) return '';
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  // Extract text from multimodal content
+  return content
+    .filter(item => item.type === 'text' && item.text)
+    .map(item => item.text || '')
+    .join('\n');
+};
+
+const copyToClipboard = async (content: MultimodalContent | string | null | undefined) => {
   try {
+    const text = typeof content === 'string' ? content : extractTextFromContent(content);
     await navigator.clipboard.writeText(text);
     toast.success("Copiado para a área de transferência!");
   } catch {
@@ -168,38 +186,110 @@ export default function ChatClient() {
   );
   const isSendingRef = useRef(false);
 
+  // File attachment state
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+
+  // Image modal state
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<{
+    url: string;
+    filename?: string;
+  } | null>(null);
+
+  const openImageModal = (url: string, filename?: string) => {
+    setSelectedImage({ url, filename });
+    setImageModalOpen(true);
+  };
+
+  const closeImageModal = () => {
+    setImageModalOpen(false);
+    setSelectedImage(null);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Verificação síncrona para evitar envios duplicados rápidos
     if (isSendingRef.current) return;
-    if (!input.trim() || !token) return;
+    if ((!input.trim() && attachedFiles.length === 0) || !token) return;
 
     isSendingRef.current = true;
     const startTime = Date.now();
     setRequestStartTime(startTime);
 
+    // Criar mensagem de usuário com conteúdo multimodal se houver arquivos
+    let messageContent: MultimodalContent;
+
+    if (attachedFiles.length > 0) {
+      // Criar array multimodal
+      const contentItems: MultimodalContentItem[] = [];
+
+      // Adicionar texto se houver
+      if (input.trim()) {
+        contentItems.push({
+          type: 'text',
+          text: input,
+        });
+      }
+
+      // Adicionar arquivos
+      for (const file of attachedFiles) {
+        if (file.preview) {
+          // Imagem com preview
+          contentItems.push({
+            type: 'image_url',
+            filename: file.file.name,
+            image_url: {
+              url: file.preview,
+            },
+          });
+        } else {
+          // Arquivo sem preview (PDF, documento, etc)
+          contentItems.push({
+            type: 'media',
+            filename: file.file.name,
+            mime_type: file.file.type,
+            data: file.file.name, // Placeholder - será substituído pelo base64 do backend
+          });
+        }
+      }
+
+      messageContent = contentItems;
+    } else {
+      // Apenas texto
+      messageContent = input;
+    }
+
     const userMessage: DisplayMessage = {
       sender: "user",
-      content: input,
+      content: messageContent,
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => {
       return [...prev, userMessage];
     });
+
+    const currentInput = input;
+    const currentFiles = [...attachedFiles];
+
     setInput("");
+    setAttachedFiles([]);
     setIsLoading(true);
 
     try {
       const payload: ChatRequestPayload = {
         user_id: userId,
-        message: input,
+        message: currentInput,
         session_timeout_seconds: sessionTimeoutSeconds,
         use_whatsapp_format: useWhatsappFormat,
       };
 
-      // Chamada direta sem retry automático
-      const botResponseData = await sendChatMessage(payload, token);
+      // Enviar mensagem (com ou sem arquivos)
+      const botResponseData = await sendChatMessage(
+        payload,
+        token,
+        currentFiles.length > 0 ? currentFiles.map(f => f.file) : undefined
+      );
 
       const latency = (Date.now() - startTime) / 1000;
       const assistantMessage = botResponseData.messages.find(
@@ -370,9 +460,212 @@ export default function ChatClient() {
     }
   };
 
-  // Helper to render message content
-  const renderMessageContent = (content: string, isUser: boolean) => {
-    const parsed = marked.parse(content || "", { breaks: true }) as string;
+  // Helper to render message content (handles both text and multimodal content)
+  const renderMessageContent = (content: any, isUser: boolean) => {
+    // Handle multimodal content (array format)
+    if (Array.isArray(content)) {
+      // Separar texto de arquivos/imagens
+      const textItems = content.filter(item => item.type === "text");
+      const mediaItems = content.filter(item => item.type === "media" || item.type === "image_url");
+
+      return (
+        <div className="p-4 pr-12">
+          {/* Texto primeiro */}
+          {textItems.length > 0 && (
+            <div className="space-y-2">
+              {textItems.map((item: any, index: number) => {
+                const parsed = marked.parse(item.text, { breaks: true }) as string;
+                const styledHTML = parsed.replace(
+                  /<pre><code class="language-json">/g,
+                  `<pre style="background-color: transparent; padding: 1rem; border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"><code class="language-json" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">`
+                );
+
+                const baseStyles: React.CSSProperties = isUser
+                  ? {}
+                  : {
+                      "--tw-prose-pre-bg": "rgb(31 41 55)",
+                      "--tw-prose-pre-code": "rgb(209 213 219)",
+                    } as React.CSSProperties;
+
+                return (
+                  <div key={`text-${index}`}>
+                    <div
+                      className={`prose prose-sm dark:prose-invert whitespace-pre-wrap prose-base-custom break-words overflow-wrap-anywhere ${
+                        isUser ? "text-primary-foreground user-message-content" : ""
+                      }`}
+                      style={baseStyles}
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Anexos depois */}
+          {mediaItems.length > 0 && (
+            <div className={`flex flex-wrap gap-2 ${textItems.length > 0 ? "mt-3 pt-3 border-t" : ""} ${
+              isUser ? "border-white/10" : "border-border/30"
+            }`}>
+              {mediaItems.map((item: any, index: number) => {
+            // Media content (images, PDFs, etc)
+            if (item.type === "media" && item.mime_type && item.data) {
+              const mimeType = item.mime_type;
+              const isImage = mimeType.startsWith("image/");
+              const imageUrl = `data:${mimeType};base64,${item.data}`;
+              const filename = item.filename || "file";
+
+              if (isImage) {
+                // Thumbnail clicável para expandir
+                return (
+                  <div key={index} className="inline-block mr-2 mb-2">
+                    <div
+                      className={`relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all ${
+                        isUser
+                          ? "border-white/20 hover:border-white/60"
+                          : "border-primary/20 hover:border-primary/60"
+                      }`}
+                      onClick={() => openImageModal(imageUrl, filename)}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={filename}
+                        className="transition-transform group-hover:scale-105"
+                        style={{
+                          maxHeight: "100px",
+                          maxWidth: "100px",
+                          objectFit: "cover",
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                        <div className="bg-black/60 rounded-full p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Search className="h-4 w-4 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                    {filename && (
+                      <p
+                        className={`text-xs mt-1 truncate max-w-[100px] ${
+                          isUser ? "text-primary-foreground/80" : "text-muted-foreground"
+                        }`}
+                      >
+                        {filename}
+                      </p>
+                    )}
+                  </div>
+                );
+              } else {
+                // Link de download para arquivos não-imagem
+                const handleDownload = () => {
+                  const link = document.createElement("a");
+                  link.href = imageUrl;
+                  link.download = filename;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                };
+
+                // Determinar ícone baseado no tipo
+                const getFileIcon = () => {
+                  if (mimeType.includes("pdf")) return "📄";
+                  if (mimeType.includes("python")) return "🐍";
+                  if (mimeType.includes("javascript") || mimeType.includes("typescript")) return "📜";
+                  if (mimeType.includes("json")) return "📋";
+                  if (mimeType.includes("markdown")) return "📝";
+                  return "📎";
+                };
+
+                return (
+                  <div
+                    key={index}
+                    onClick={handleDownload}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer transition-all group ${
+                      isUser
+                        ? "bg-white/10 hover:bg-white/20 border border-white/20 hover:border-white/40"
+                        : "bg-primary/5 hover:bg-primary/10 border border-primary/20 hover:border-primary/40"
+                    }`}
+                  >
+                    <span className="text-lg">{getFileIcon()}</span>
+                    <div className="flex flex-col min-w-0">
+                      <span
+                        className={`text-sm font-medium truncate max-w-[200px] ${
+                          isUser
+                            ? "text-primary-foreground group-hover:underline"
+                            : "text-foreground group-hover:underline"
+                        }`}
+                      >
+                        {filename}
+                      </span>
+                      <span
+                        className={`text-xs truncate ${
+                          isUser ? "text-primary-foreground/70" : "text-muted-foreground"
+                        }`}
+                      >
+                        {mimeType.split("/")[1] || mimeType}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+            }
+
+            // Image URL format (alternative format)
+            if (item.type === "image_url" && item.image_url?.url) {
+              const imageUrl = item.image_url.url;
+              const filename = item.filename || "image";
+
+              return (
+                <div key={index} className="inline-block mr-2 mb-2">
+                  <div
+                    className={`relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all ${
+                      isUser
+                        ? "border-white/20 hover:border-white/60"
+                        : "border-primary/20 hover:border-primary/60"
+                    }`}
+                    onClick={() => openImageModal(imageUrl, filename)}
+                  >
+                    <img
+                      src={imageUrl}
+                      alt={filename}
+                      className="transition-transform group-hover:scale-105"
+                      style={{
+                        maxHeight: "100px",
+                        maxWidth: "100px",
+                        objectFit: "cover",
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                      <div className="bg-black/60 rounded-full p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Search className="h-4 w-4 text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  {filename && (
+                    <p
+                      className={`text-xs mt-1 truncate max-w-[100px] ${
+                        isUser ? "text-primary-foreground/80" : "text-muted-foreground"
+                      }`}
+                    >
+                      {filename}
+                    </p>
+                  )}
+                </div>
+              );
+            }
+
+            return null;
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Handle plain text content (string)
+    const textContent = typeof content === "string" ? content : String(content || "");
+    const parsed = marked.parse(textContent, { breaks: true }) as string;
 
     const styledHTML = parsed.replace(
       /<pre><code class="language-json">/g,
@@ -392,7 +685,9 @@ export default function ChatClient() {
           isUser ? "text-primary-foreground user-message-content" : ""
         }`}
         style={baseStyles}
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ['style'] }) }}
+        dangerouslySetInnerHTML={{
+          __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
+        }}
       />
     );
   };
@@ -573,7 +868,7 @@ export default function ChatClient() {
                                         : "bg-primary/10 hover:bg-primary/20 border-primary/20 hover:border-primary/30 text-primary"
                                     }`}
                                     onClick={() =>
-                                      copyToClipboard(msg.content || "")
+                                      copyToClipboard(msg.content)
                                     }
                                   >
                                     <Copy className="h-3 w-3" />
@@ -1106,6 +1401,8 @@ export default function ChatClient() {
           requestStartTime={requestStartTime}
           onSendMessage={handleSendMessage}
           textareaRef={textareaRef}
+          attachedFiles={attachedFiles}
+          onFilesChange={setAttachedFiles}
         />
       </Card>
 
@@ -1136,6 +1433,14 @@ export default function ChatClient() {
           toast.info("Tela limpa!");
         }}
         onDeleteHistory={handleDeleteHistory}
+      />
+
+      {/* Image Modal */}
+      <ImageModal
+        isOpen={imageModalOpen}
+        onClose={closeImageModal}
+        imageUrl={selectedImage?.url || ""}
+        filename={selectedImage?.filename}
       />
     </div>
   );

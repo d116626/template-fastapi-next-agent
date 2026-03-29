@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union
 from datetime import datetime
 from langchain_core.load.dump import dumpd
 
@@ -13,6 +13,7 @@ from src.llm.history import (
     get_thread_history,
     delete_thread_history,
 )
+from src.utils.file_processor import FileProcessor
 
 router = APIRouter(
     prefix="/chat",
@@ -24,12 +25,27 @@ router = APIRouter(
 agents: Dict[str, Agent] = {}
 
 
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str
-    system_prompt: Optional[str] = "You are a helpful assistant."
-    session_timeout_seconds: Optional[int] = None
-    use_whatsapp_format: bool = True
+def get_file_type_from_mime(mime_type: str) -> str:
+    """
+    Determina o tipo de arquivo baseado no MIME type.
+
+    Args:
+        mime_type: Tipo MIME do arquivo
+
+    Returns:
+        Tipo do arquivo: "image", "pdf", "code", ou "document"
+    """
+    if mime_type.startswith("image/"):
+        return "image"
+    elif mime_type == "application/pdf":
+        return "pdf"
+    elif any(
+        x in mime_type
+        for x in ["javascript", "python", "java", "text/x-", "typescript"]
+    ):
+        return "code"
+    else:
+        return "document"
 
 
 class ChatResponse(BaseModel):
@@ -51,44 +67,139 @@ def get_or_create_agent(user_id: str, system_prompt: str) -> Agent:
 
 
 @router.post("/message", response_model=ChatResponse)
-async def send_message(request: ChatRequest):
+async def send_message(
+    message: str = Form(...),
+    user_id: str = Form(...),
+    system_prompt: str = Form("You are a helpful assistant."),
+    session_timeout_seconds: Optional[int] = Form(None),
+    use_whatsapp_format: bool = Form(True),
+    files: List[UploadFile] = File(default=[]),
+):
     """
-    Send a message to the chat agent.
+    Send a message to the chat agent, with or without files.
 
+    **Fields:**
     - **message**: The user's message
     - **user_id**: Unique identifier for the user
-    - **system_prompt**: Optional system prompt for the agent
+    - **system_prompt**: Optional system prompt for the agent (default: "You are a helpful assistant.")
+    - **session_timeout_seconds**: Optional session timeout in seconds
+    - **use_whatsapp_format**: Whether to use WhatsApp format (default: True)
+    - **files**: Optional list of files to upload (images, PDFs, code, documents)
     """
     try:
-        logger.info(f"[Chat API] Received message from user {request.user_id}")
+        file_count = len(files) if files else 0
+        logger.info(
+            f"[Chat API] Received message from user {user_id} with {file_count} file(s)"
+        )
 
         # Get or create agent for this user
-        agent = get_or_create_agent(request.user_id, request.system_prompt)
+        agent = get_or_create_agent(user_id, system_prompt)
+
+        # Process files if provided
+        content: Union[str, List[Dict]]
+        files_metadata = []
+
+        if files and len(files) > 0:
+            processed_files = []
+            for file in files:
+                try:
+                    # Read file content
+                    file_content = await file.read()
+
+                    # Get MIME type
+                    mime_type = file.content_type or "application/octet-stream"
+
+                    # Process file
+                    file_info = FileProcessor.process_file(
+                        file_content, file.filename, mime_type
+                    )
+                    processed_files.append(file_info)
+
+                    logger.info(
+                        f"[Chat API] Processed file: {file.filename} "
+                        f"(Type: {get_file_type_from_mime(file_info['mime_type'])}, "
+                        f"MIME: {file_info['mime_type']}, Size: {file_info['size']} bytes)"
+                    )
+
+                    # Collect metadata
+                    files_metadata.append(
+                        {
+                            "filename": file_info["filename"],
+                            "type": get_file_type_from_mime(
+                                file_info.get("mime_type", "")
+                            ),
+                            "mime_type": file_info.get("mime_type"),
+                            "size": file_info.get("size"),
+                        }
+                    )
+
+                except ValueError as e:
+                    logger.warning(
+                        f"[Chat API] Skipping unsupported file: {file.filename} "
+                        f"(MIME: {mime_type}) - {str(e)}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"[Chat API] Error processing file {file.filename}: {e}",
+                        exc_info=True,
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Error processing file {file.filename}: {str(e)}",
+                    )
+
+            # Create multimodal content if files were processed
+            if processed_files:
+                content = FileProcessor.create_langchain_content(
+                    message, processed_files
+                )
+                logger.info(
+                    f"[Chat API] Created multimodal content with {len(content)} elements"
+                )
+            else:
+                # Fallback to text-only if no files were successfully processed
+                content = message
+                logger.warning(
+                    "[Chat API] No files were successfully processed, using text-only"
+                )
+        else:
+            # No files, use plain text
+            content = message
 
         # Prepare data
-        data = {
-            "messages": [{"role": "user", "content": request.message}],
-        }
-        config = {"configurable": {"thread_id": request.user_id}}
+        data = {"messages": [{"role": "user", "content": content}]}
+
+        # Add file metadata to additional_kwargs if files were attached
+        if files_metadata:
+            data["messages"][0]["additional_kwargs"] = {"files": files_metadata}
+
+        config = {"configurable": {"thread_id": user_id}}
 
         # Query agent
         result = await agent.async_query(input=data, config=config)
+
         # Extract response from messages
         messages = result.get("messages", [])
 
-        logger.info(f"[Chat API] Response generated for user {request.user_id}")
+        logger.info(f"[Chat API] Response generated for user {user_id}")
+
+        # Format messages
         parsed_messages = to_gateway_format(
             messages=messages,
-            thread_id=request.user_id,
-            session_timeout_seconds=request.session_timeout_seconds,
-            use_whatsapp_format=request.use_whatsapp_format,
+            thread_id=user_id,
+            session_timeout_seconds=session_timeout_seconds,
+            use_whatsapp_format=use_whatsapp_format,
         )
-        reponse_messages = parsed_messages.get("data", {}).get("messages", [])
+        response_messages = parsed_messages.get("data", {}).get("messages", [])
+
         return ChatResponse(
-            messages=reponse_messages,
-            user_id=request.user_id,
+            messages=response_messages,
+            user_id=user_id,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[Chat API] Error processing message: {e}", exc_info=True)
         raise HTTPException(

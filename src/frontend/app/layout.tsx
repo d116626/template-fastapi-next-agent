@@ -19,8 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EAI Admin Panel",
-  description: "Admin panel for EAI experiments",
+  title: "Admin Panel",
+  description: "Admin panel",
 };
 
 export default function RootLayout({

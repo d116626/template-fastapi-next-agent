@@ -31,7 +31,7 @@ export interface AgentMessage {
   message_type: 'tool_call_message' | 'tool_return_message' | 'assistant_message' | 'user_message';
   tool_call?: ToolCall;
   tool_return?: ToolReturn;
-  content?: string;
+  content?: string | any[]; // Can be string or multimodal array
 }
 
 export interface ChatResponseData {
@@ -57,18 +57,46 @@ export interface DeleteHistoryResponseData {
 
 // --- API Functions ---
 
-export async function sendChatMessage(payload: ChatRequestPayload, token: string): Promise<ChatResponseData> {
+export async function sendChatMessage(
+  payload: ChatRequestPayload,
+  token: string,
+  files?: File[]
+): Promise<ChatResponseData> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
 
   try {
+    // Sempre usar FormData (unificado)
+    const formData = new FormData();
+    formData.append('message', payload.message);
+    formData.append('user_id', payload.user_id);
+
+    if (payload.system_prompt) {
+      formData.append('system_prompt', payload.system_prompt);
+    }
+
+    if (payload.session_timeout_seconds !== undefined) {
+      formData.append('session_timeout_seconds', payload.session_timeout_seconds.toString());
+    }
+
+    if (payload.use_whatsapp_format !== undefined) {
+      formData.append('use_whatsapp_format', payload.use_whatsapp_format.toString());
+    }
+
+    // Adicionar arquivos se houver
+    if (files && files.length > 0) {
+      files.forEach((file) => {
+        formData.append('files', file);
+      });
+    }
+
     const res = await fetch(`${API_BASE_URL}/api/v1/chat/message`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+        // Não definir Content-Type - o browser define automaticamente com boundary
       },
-      body: JSON.stringify(payload),
+      body: formData,
       signal: controller.signal,
     });
 

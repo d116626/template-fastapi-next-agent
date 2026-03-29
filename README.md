@@ -1,1 +1,1 @@
-# vortex
+# template-fastapi-next-agent

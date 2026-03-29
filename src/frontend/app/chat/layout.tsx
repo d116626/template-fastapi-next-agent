@@ -8,8 +8,8 @@ function LayoutContent({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col h-screen">
       <AppHeader
-        title="Chat EAI"
-        subtitle="Converse diretamente com a EAI"
+        title="Chat"
+        subtitle="Converse diretamente com a AI"
       />
       <main className="flex-1 overflow-hidden">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-full py-6">

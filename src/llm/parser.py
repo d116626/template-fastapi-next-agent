@@ -240,10 +240,13 @@ class LangGraphMessageFormatter:
         self, kwargs: Dict[str, Any], base_dict: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Processa mensagem do tipo human."""
+        # Preserve multimodal content (array) or string
+        content = kwargs.get("content", "")
+
         return {
             **base_dict,
             "message_type": "user_message",
-            "content": kwargs.get("content", ""),
+            "content": content,  # Can be string or list (multimodal)
         }
 
     def process_ai_message(
