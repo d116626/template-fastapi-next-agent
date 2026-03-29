@@ -15,6 +15,7 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from src.config import env
@@ -129,12 +130,178 @@ class Agent:
         # Wrap tools with logging
         wrapped_tools = self._wrap_tools_with_logging(self._tools)
 
+        # Create middleware instance
+        hooks_middleware = self._create_hooks_middleware()
+
         self._graph = create_agent(
             model=llm,
             tools=wrapped_tools,
             system_prompt=self._system_prompt,
             checkpointer=checkpointer,
+            middleware=[hooks_middleware],
         )
+
+    def _create_hooks_middleware(self):
+        """Create a single middleware that consolidates all pre/post model hooks."""
+
+        class HooksMiddleware(AgentMiddleware):
+            """Custom middleware that handles timestamps and thread_id injection."""
+
+            def __init__(self, parent_agent):
+                self.parent_agent = parent_agent
+
+            def before_model(self, state, runtime):
+                """Pre-model hook: orchestrates all pre-model operations."""
+                return self.parent_agent._pre_model_hook(state)
+
+            def after_model(self, state, runtime):
+                """Post-model hook: orchestrates all post-model operations."""
+                return self.parent_agent._post_model_hook(state)
+
+        return HooksMiddleware(self)
+
+    def _pre_model_hook(self, state):
+        """Centralized pre-model hook that calls all necessary functions."""
+        # Add timestamps to ToolMessages
+        return self._add_timestamp_to_tool_messages(state)
+
+    def _post_model_hook(self, state):
+        """Centralized post-model hook that calls all necessary functions."""
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        last_message = messages[-1]
+
+        if not isinstance(last_message, AIMessage):
+            return None
+
+        # Get thread_id from state
+        thread_id = state.get("thread_id")
+
+        # Add timestamp to AIMessage
+        self._add_timestamp_to_ai_message(last_message)
+
+        # Inject thread_id into tool calls
+        if thread_id:
+            self._inject_thread_id_in_tool_calls(last_message, thread_id)
+
+        # Log tool calls
+        self._log_tool_calls(last_message)
+
+        return {"messages": [last_message]}
+
+    def _add_timestamp_to_tool_messages(self, state):
+        """Add timestamps to ToolMessages before model call."""
+        messages = state.get("messages", [])
+        current_time = datetime.now(timezone.utc).isoformat()
+        updates = []
+
+        for message in messages:
+            if (
+                isinstance(message, ToolMessage)
+                and hasattr(message, "additional_kwargs")
+                and "timestamp" not in message.additional_kwargs
+            ):
+                message.additional_kwargs["timestamp"] = current_time
+
+                # Normalize tool response: extract first item if content is a list
+                if isinstance(message.content, list) and len(message.content) > 0:
+                    message.content = message.content[0]
+                    logger.debug(
+                        f"[Tool Execution] Normalized list response to single item for tool: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
+                    )
+
+                updates.append(message)
+
+                # Log tool execution result
+                logger.info("[Tool Execution] Tool execution completed")
+                logger.info(
+                    f"[Tool Execution]   - Tool Call ID: {message.tool_call_id if hasattr(message, 'tool_call_id') else 'UNKNOWN'}"
+                )
+                logger.info(
+                    f"[Tool Execution]   - Tool Name: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
+                )
+                logger.info(
+                    f"[Tool Execution]   - Status: {message.status if hasattr(message, 'status') else 'success'}"
+                )
+
+                # Log the content (result), but limit size for large responses
+                content_str = str(message.content)
+                if len(content_str) > 1000:
+                    logger.info(
+                        f"[Tool Execution]   - Result (first 1000 chars): {content_str[:1000]}..."
+                    )
+                    logger.info(
+                        f"[Tool Execution]   - Result length: {len(content_str)} characters"
+                    )
+                else:
+                    logger.info(f"[Tool Execution]   - Result: {content_str}")
+
+        return {"messages": updates} if updates else None
+
+    def _add_timestamp_to_ai_message(self, message):
+        """Add timestamp to AIMessage after model call."""
+        current_time = datetime.now(timezone.utc).isoformat()
+
+        if (
+            hasattr(message, "additional_kwargs")
+            and "timestamp" not in message.additional_kwargs
+        ):
+            message.additional_kwargs["timestamp"] = current_time
+
+    def _inject_thread_id_in_tool_calls(self, message, thread_id):
+        """Inject thread_id into tool calls that expect user_id parameter."""
+        if not hasattr(message, "tool_calls") or not message.tool_calls:
+            return
+
+        # Get tool definitions to check if they expect user_id parameter
+        tool_names_expecting_user_id = set()
+        for tool in self._tools:
+            # Check if tool has user_id parameter
+            if hasattr(tool, 'args_schema') and tool.args_schema:
+                schema = tool.args_schema
+
+                if hasattr(schema, '__fields__') and 'user_id' in schema.__fields__:
+                    tool_names_expecting_user_id.add(tool.name)
+                elif hasattr(schema, 'model_fields') and 'user_id' in schema.model_fields:
+                    tool_names_expecting_user_id.add(tool.name)
+            elif hasattr(tool, 'args') and isinstance(tool.args, dict) and 'user_id' in tool.args:
+                tool_names_expecting_user_id.add(tool.name)
+
+        # Inject thread_id into matching tool calls
+        for tool_call in message.tool_calls:
+            tool_name = tool_call.get('name')
+
+            # If tool expects user_id, inject thread_id
+            if tool_name in tool_names_expecting_user_id:
+                if "args" not in tool_call:
+                    tool_call["args"] = {}
+
+                if not isinstance(tool_call["args"], dict):
+                    continue
+
+                # Inject thread_id as user_id
+                tool_call["args"]["user_id"] = thread_id
+                logger.info(f"[Thread ID] Injected thread_id '{thread_id}' into tool call '{tool_name}'")
+
+    def _log_tool_calls(self, message):
+        """Log tool calls if present in the message."""
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            logger.info("[Tool Execution] AI Message with tool calls detected")
+            for i, tool_call in enumerate(message.tool_calls, 1):
+                logger.info(f"[Tool Execution] Tool Call #{i}:")
+                logger.info(
+                    f"[Tool Execution]   - Tool Name: {tool_call.get('name', 'UNKNOWN')}"
+                )
+                logger.info(
+                    f"[Tool Execution]   - Tool ID: {tool_call.get('id', 'UNKNOWN')}"
+                )
+                logger.info(
+                    f"[Tool Execution]   - Tool Args: {tool_call.get('args', {})}"
+                )
+                logger.info(f"[Tool Execution]   - Full Tool Call: {tool_call}")
+
 
     async def _ensure_async_setup(self):
         """Ensure async components are set up."""
@@ -242,6 +409,18 @@ class Agent:
         """Centralizes all manipulations on input arguments before invoking the graph."""
         kwargs = self._add_timestamp_to_input_messages(**kwargs)
         kwargs = self._sanitize_input_messages(**kwargs)
+        kwargs = self._inject_thread_id_into_state(**kwargs)
+        return kwargs
+
+    def _inject_thread_id_into_state(self, **kwargs):
+        """Inject thread_id from config into the state so middleware can access it."""
+        config = kwargs.get("config", {})
+        thread_id = config.get("configurable", {}).get("thread_id")
+
+        if thread_id and "input" in kwargs:
+            # Add thread_id to the input state
+            kwargs["input"]["thread_id"] = thread_id
+
         return kwargs
 
     def _add_timestamp_to_input_messages(self, **kwargs):
@@ -251,54 +430,6 @@ class Agent:
             message["additional_kwargs"] = {"timestamp": msg_datetime}
         return kwargs
 
-    def _combined_pre_model_hook(self, state, config=None):
-        # Step 1: Add timestamps to new ToolMessages (safe update, modifies in-place)
-        # We invoke this for the side-effect on state['messages'], relying on
-        # _inject_long_term_memory or subsequent steps to return the messages list.
-        self._add_timestamp_to_tool_messages(state)
-
-        # No filtering applied, just inject thread_id normally
-        return self._inject_thread_id_in_user_id_params(state, config)
-
-    def _combined_post_model_hook(self, state, config=None):
-        # Log tool calls if present
-        messages = state.get("messages", [])
-        for msg in reversed(messages):
-            if (
-                isinstance(msg, AIMessage)
-                and hasattr(msg, "tool_calls")
-                and msg.tool_calls
-            ):
-                logger.info("[Tool Execution] AI Message with tool calls detected")
-                for i, tool_call in enumerate(msg.tool_calls, 1):
-                    logger.info(f"[Tool Execution] Tool Call #{i}:")
-                    logger.info(
-                        f"[Tool Execution]   - Tool Name: {tool_call.get('name', 'UNKNOWN')}"
-                    )
-                    logger.info(
-                        f"[Tool Execution]   - Tool ID: {tool_call.get('id', 'UNKNOWN')}"
-                    )
-                    logger.info(
-                        f"[Tool Execution]   - Tool Args: {tool_call.get('args', {})}"
-                    )
-                    logger.info(f"[Tool Execution]   - Full Tool Call: {tool_call}")
-                break  # Only log the most recent AI message
-
-        # Check if upsert_user_memory tool was called
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls"):
-                for tool_call in msg.tool_calls:
-                    if tool_call.get("name") == "upsert_user_memory":
-                        self._memory_needs_refresh = True
-                        logger.info(
-                            "[Long-Term Memory] Detected upsert_user_memory call, flagging for refresh"
-                        )
-                        break
-                break  # Only check the last AI message
-        # Add timestamp to the new AIMessage (modifies in-place)
-        self._add_timestamp_to_ai_message(state)
-
-        return self._inject_thread_id_in_user_id_params(state, config)
 
     def _sanitize_input_messages(self, **kwargs):
         """Sanitizes input messages to prevent Vertex AI errors with integer lists in strings.
@@ -343,121 +474,3 @@ class Agent:
                     pass
         return kwargs
 
-    def _add_timestamp_to_ai_message(self, state):
-        """Hook para adicionar timestamp na AIMessage (Agent) logo após geração."""
-        messages = state.get("messages", [])
-        if not messages:
-            return {}
-
-        last_message = messages[-1]
-        current_time = datetime.now(timezone.utc).isoformat()
-
-        if (
-            isinstance(last_message, AIMessage)
-            and hasattr(last_message, "additional_kwargs")
-            and "timestamp" not in last_message.additional_kwargs
-        ):
-            last_message.additional_kwargs["timestamp"] = current_time
-            # Retorna apenas a mensagem modificada
-            return {"messages": [last_message]}
-
-        return {}
-
-    def _inject_thread_id_in_user_id_params(self, state, config=None):
-        """Hook para injetar thread_id em qualquer parâmetro user_id de tool calls.
-
-        Este hook processa todas as tool calls e substitui qualquer parâmetro
-        'user_id' pelo thread_id atual, garantindo que todas as ferramentas
-        recebam o identificador correto do usuário.
-
-        Args:
-            state: Estado do grafo contendo as mensagens
-            config: Configuração do LangGraph (pode ser None em alguns contextos)
-
-        Returns:
-            dict: Estado atualizado com thread_id injetado em todos os parâmetros user_id
-        """
-        messages = state.get("messages", [])
-
-        # Múltiplas formas de tentar obter o thread_id
-        thread_id = None
-
-        # Método 1: Diretamente do parâmetro config
-        if config and isinstance(config, dict):
-            configurable = config.get("configurable", {})
-            thread_id = configurable.get("thread_id")
-
-        # Método 2: Se config não foi passado, tenta do state (fallback)
-        if not thread_id and hasattr(state, "config"):
-            state_config = getattr(state, "config", {})
-            if isinstance(state_config, dict):
-                configurable = state_config.get("configurable", {})
-                thread_id = configurable.get("thread_id")
-
-        if thread_id:
-            # Processa apenas a última mensagem AI que pode ter tool calls
-            for message in reversed(messages):
-                if hasattr(message, "tool_calls") and message.tool_calls:
-                    for tool_call in message.tool_calls:
-                        # Verifica se a tool call tem argumentos e se possui user_id
-                        if (
-                            "args" in tool_call
-                            and isinstance(tool_call["args"], dict)
-                            and "user_id" in tool_call["args"]
-                        ):
-                            # Substitui user_id pelo thread_id
-                            tool_call["args"]["user_id"] = thread_id
-                    break  # Processa apenas a última mensagem AI
-
-        return {"messages": messages}
-
-    def _add_timestamp_to_tool_messages(self, state):
-        """Hook para adicionar timestamp nas ToolMessages após execução."""
-        messages = state.get("messages", [])
-        current_time = datetime.now(timezone.utc).isoformat()
-        updates = []
-
-        # Adicionar timestamp apenas nas ToolMessages que não têm
-        for message in messages:
-            if (
-                isinstance(message, ToolMessage)
-                and hasattr(message, "additional_kwargs")
-                and "timestamp" not in message.additional_kwargs
-            ):
-                message.additional_kwargs["timestamp"] = current_time
-
-                # Normalize tool response: extract first item if content is a list
-                if isinstance(message.content, list) and len(message.content) > 0:
-                    message.content = message.content[0]
-                    logger.debug(
-                        f"[Tool Execution] Normalized list response to single item for tool: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
-                    )
-
-                updates.append(message)
-
-                # Log tool execution result
-                logger.info("[Tool Execution] Tool execution completed")
-                logger.info(
-                    f"[Tool Execution]   - Tool Call ID: {message.tool_call_id if hasattr(message, 'tool_call_id') else 'UNKNOWN'}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Tool Name: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Status: {message.status if hasattr(message, 'status') else 'success'}"
-                )
-
-                # Log the content (result), but limit size for large responses
-                content_str = str(message.content)
-                if len(content_str) > 1000:
-                    logger.info(
-                        f"[Tool Execution]   - Result (first 1000 chars): {content_str[:1000]}..."
-                    )
-                    logger.info(
-                        f"[Tool Execution]   - Result length: {len(content_str)} characters"
-                    )
-                else:
-                    logger.info(f"[Tool Execution]   - Result: {content_str}")
-
-        # Retorna APENAS as mensagens modificadas para evitar duplicação no add_messages
-        return {"messages": updates} if updates else {}
