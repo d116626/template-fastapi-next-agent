@@ -170,7 +170,10 @@ class Agent:
                 )
             async for event in self._graph.astream_events(**kwargs, version="v2"):
                 # Apply filter to final messages on chain end
-                if event.get("event") == "on_chain_end" and event.get("name") == "LangGraph":
+                if (
+                    event.get("event") == "on_chain_end"
+                    and event.get("name") == "LangGraph"
+                ):
                     output = event.get("data", {}).get("output", {})
                     if "messages" in output:
                         # Apply the same filter as async_query
@@ -180,8 +183,8 @@ class Agent:
                             **event,
                             "data": {
                                 **event.get("data", {}),
-                                "output": filtered_output
-                            }
+                                "output": filtered_output,
+                            },
                         }
 
                 # Stream all events (filtered or not)
@@ -371,31 +374,7 @@ class Agent:
 
         for tool in tools:
             # Create a wrapped version of the tool
-            original_invoke = tool._run
             original_ainvoke = tool._arun
-
-            def create_sync_wrapper(original_func, tool_name):
-                @wraps(original_func)
-                def sync_wrapper(*args, **kwargs):
-                    logger.info(f"[Tool Invocation] SYNC: Invoking tool: {tool_name}")
-                    try:
-                        result = original_func(*args, **kwargs)
-                        result_str = str(result)
-                        if len(result_str) > 500:
-                            logger.info(
-                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
-                            )
-                        else:
-                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
-                        return result
-                    except Exception as e:
-                        logger.error(
-                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
-                            exc_info=True,
-                        )
-                        raise
-
-                return sync_wrapper
 
             def create_async_wrapper(original_func, tool_name):
                 @wraps(original_func)
@@ -421,7 +400,6 @@ class Agent:
                 return async_wrapper
 
             # Wrap the tool methods
-            tool._run = create_sync_wrapper(original_invoke, tool.name)
             tool._arun = create_async_wrapper(original_ainvoke, tool.name)
 
             wrapped_tools.append(tool)

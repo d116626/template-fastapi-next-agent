@@ -8,7 +8,7 @@ from langchain.tools import tool
 
 
 @tool("calculator_add")
-def add(a: float, b: float) -> float:
+async def add(a: float, b: float) -> float:
     """
     Soma dois números.
 
@@ -25,7 +25,7 @@ def add(a: float, b: float) -> float:
 
 
 @tool("calculator_subtract")
-def subtract(a: float, b: float) -> float:
+async def subtract(a: float, b: float) -> float:
     """
     Subtrai dois números.
 
@@ -42,7 +42,7 @@ def subtract(a: float, b: float) -> float:
 
 
 @tool("calculator_multiply")
-def multiply(a: float, b: float) -> float:
+async def multiply(a: float, b: float) -> float:
     """
     Multiplica dois números.
 
@@ -59,7 +59,7 @@ def multiply(a: float, b: float) -> float:
 
 
 @tool("calculator_divide")
-def divide(a: float, b: float) -> float:
+async def divide(a: float, b: float) -> float:
     """
     Divide dois números.
 
@@ -82,7 +82,7 @@ def divide(a: float, b: float) -> float:
 
 
 @tool("calculator_power")
-def power(base: float, exponent: Union[int, float]) -> float:
+async def power(base: float, exponent: Union[int, float]) -> float:
     """
     Calcula a potência de um número.
 

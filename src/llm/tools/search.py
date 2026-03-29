@@ -1,5 +1,3 @@
-import asyncio
-
 from src.llm.tools.search_services.google import gemini_service
 from src.config import env
 from src.utils.log import logger
