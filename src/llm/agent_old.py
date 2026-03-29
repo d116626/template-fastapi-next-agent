@@ -61,6 +61,7 @@ class Agent:
             temperature=self._temperature,
             include_thoughts=self._include_thoughts,
             thinking_budget=self._thinking_budget,
+            streaming=True,  # Enable token-by-token streaming
         )
 
         # Wrap tools with logging
@@ -141,8 +142,8 @@ class Agent:
 
         return filtered_result
 
-    async def async_stream_query(self, **kwargs) -> AsyncIterable[Any]:
-        """Asynchronous streaming query execution with filtered chunks."""
+    async def async_stream_events(self, **kwargs) -> AsyncIterable[Any]:
+        """Asynchronous streaming with token-by-token events."""
         kwargs = self._combined_pre_invoke_hook(**kwargs)
 
         async def async_generator() -> AsyncIterable[Any]:
@@ -151,9 +152,40 @@ class Agent:
                 raise ValueError(
                     "Graph is not initialized. Call _ensure_async_setup first."
                 )
-            async for chunk in self._graph.astream(**kwargs):
-                filtered_chunk = self._filter_streaming_chunk(chunk)
-                yield dumpd(filtered_chunk)
+            async for event in self._graph.astream_events(**kwargs, version="v2"):
+                # Stream token-level events and other relevant events
+                yield event
+
+        return async_generator()
+
+    async def async_stream_events_filtered(self, **kwargs) -> AsyncIterable[Any]:
+        """Asynchronous streaming with token-by-token events and filtered messages."""
+        kwargs = self._combined_pre_invoke_hook(**kwargs)
+
+        async def async_generator() -> AsyncIterable[Any]:
+            await self._ensure_async_setup()
+            if self._graph is None:
+                raise ValueError(
+                    "Graph is not initialized. Call _ensure_async_setup first."
+                )
+            async for event in self._graph.astream_events(**kwargs, version="v2"):
+                # Apply filter to final messages on chain end
+                if event.get("event") == "on_chain_end" and event.get("name") == "LangGraph":
+                    output = event.get("data", {}).get("output", {})
+                    if "messages" in output:
+                        # Apply the same filter as async_query
+                        filtered_output = self._filter_current_interaction(output)
+                        # Update event with filtered messages
+                        event = {
+                            **event,
+                            "data": {
+                                **event.get("data", {}),
+                                "output": filtered_output
+                            }
+                        }
+
+                # Stream all events (filtered or not)
+                yield event
 
         return async_generator()
 

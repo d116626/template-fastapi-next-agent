@@ -45,6 +45,8 @@ interface ChatSidebarProps {
   setThinkingBudget: (value: number) => void;
   availableModels: ModelInfo[];
   isLoadingModels: boolean;
+  responseMode: 'normal' | 'stream';
+  setResponseMode: (value: 'normal' | 'stream') => void;
 
   // Handlers
   onGenerateNumber: () => void;
@@ -90,6 +92,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   setThinkingBudget,
   availableModels,
   isLoadingModels,
+  responseMode,
+  setResponseMode,
   onGenerateNumber,
   onToggleFixNumber,
   onCopyNumber,
@@ -309,6 +313,23 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 <SelectItem value="medium">Medium</SelectItem>
                 <SelectItem value="low">Low</SelectItem>
                 <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Response Mode */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+            <Label htmlFor="response-mode" className="text-sm">Response Mode</Label>
+            <Select
+              value={responseMode}
+              onValueChange={(value: 'normal' | 'stream') => setResponseMode(value)}
+            >
+              <SelectTrigger id="response-mode" className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="stream">Stream (SSE)</SelectItem>
               </SelectContent>
             </Select>
           </div>

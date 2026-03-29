@@ -21,6 +21,9 @@ export interface DisplayMessage {
   timestamp?: string;
   latency?: number;
   isTimeoutError?: boolean;
+  isStreaming?: boolean;
+  streamingThinking?: string;
+  thinkingExpanded?: boolean; // Track if user expanded thinking accordion
 }
 
 export interface InstrucaoItem {

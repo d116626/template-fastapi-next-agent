@@ -314,6 +314,140 @@ export async function sendChatMessage(
   }
 }
 
+export async function sendChatMessageStream(
+  payload: ChatRequestPayload,
+  token: string,
+  files?: File[],
+  onChunk?: (chunk: any) => void,
+  onFormatted?: (messages: AgentMessage[]) => void,
+  onDone?: () => void,
+  onError?: (error: Error) => void
+): Promise<void> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+
+  try {
+    // Sempre usar FormData (unificado)
+    const formData = new FormData();
+    formData.append('message', payload.message);
+    formData.append('user_id', payload.user_id);
+
+    if (payload.system_prompt) {
+      formData.append('system_prompt', payload.system_prompt);
+    }
+
+    if (payload.model) {
+      formData.append('model', payload.model);
+    }
+
+    if (payload.temperature !== undefined) {
+      formData.append('temperature', payload.temperature.toString());
+    }
+
+    if (payload.include_thoughts !== undefined) {
+      formData.append('include_thoughts', payload.include_thoughts.toString());
+    }
+
+    if (payload.thinking_budget !== undefined) {
+      formData.append('thinking_budget', payload.thinking_budget.toString());
+    }
+
+    if (payload.session_timeout_seconds !== undefined) {
+      formData.append('session_timeout_seconds', payload.session_timeout_seconds.toString());
+    }
+
+    if (payload.use_whatsapp_format !== undefined) {
+      formData.append('use_whatsapp_format', payload.use_whatsapp_format.toString());
+    }
+
+    // Adicionar arquivos se houver
+    if (files && files.length > 0) {
+      files.forEach((file) => {
+        formData.append('files', file);
+      });
+    }
+
+    const res = await fetch(`${API_BASE_URL}/api/v1/chat/message/stream`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        // Não definir Content-Type - o browser define automaticamente com boundary
+      },
+      body: formData,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      if (res.status === 502) {
+        throw new Error('O servidor está demorando muito para responder. Aguarde alguns instantes e tente novamente.');
+      }
+
+      const errorData = await res.json().catch(() => ({ detail: 'Failed to parse error response.' }));
+      throw new Error(errorData.detail || `Request failed with status ${res.status}`);
+    }
+
+    // Read the stream
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body stream available');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) break;
+
+      // Decode chunk
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE messages
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || ''; // Keep incomplete message in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6); // Remove "data: " prefix
+          try {
+            const chunk = JSON.parse(data);
+
+            if (chunk.type === 'done') {
+              onDone?.();
+            } else if (chunk.type === 'error') {
+              onError?.(new Error(chunk.error));
+            } else if (chunk.type === 'formatted') {
+              onFormatted?.(chunk.messages);
+            } else {
+              onChunk?.(chunk);
+            }
+          } catch (e) {
+            console.error('Error parsing SSE chunk:', e);
+          }
+        }
+      }
+    }
+
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.error("Error sending stream chat message:", error);
+
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        onError?.(new Error("Timeout: A requisição demorou mais de 5 minutos para responder."));
+        return;
+      }
+      onError?.(error);
+      return;
+    }
+
+    onError?.(new Error("Unknown error occurred"));
+  }
+}
+
 export async function getUserHistory(
   userId: string,
   token: string,

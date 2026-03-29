@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Union
 from datetime import datetime
 from langchain_core.load.dump import dumpd
+from langchain_core.load.load import load
+import json
 
 from src.core.security.dependencies import validar_token
 from src.llm.agent_old import Agent
@@ -47,6 +50,34 @@ def get_file_type_from_mime(mime_type: str) -> str:
         return "code"
     else:
         return "document"
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat messages."""
+
+    message: str = Field(..., description="The user's message")
+    user_id: str = Field(..., description="Unique identifier for the user")
+    system_prompt: str = Field(
+        default="You are a helpful assistant.",
+        description="System prompt for the agent",
+    )
+    model: str = Field(default="gemini-2.5-flash", description="Model to use")
+    temperature: float = Field(
+        default=0.7, ge=0.0, le=1.0, description="Temperature for generation"
+    )
+    include_thoughts: bool = Field(
+        default=True, description="Include model thinking process"
+    )
+    thinking_budget: int = Field(
+        default=-1,
+        description="Thinking budget tokens (-1=unlimited, 0=disabled, >0=limit)",
+    )
+    session_timeout_seconds: Optional[int] = Field(
+        default=None, description="Session timeout in seconds"
+    )
+    use_whatsapp_format: bool = Field(
+        default=True, description="Whether to use WhatsApp format"
+    )
 
 
 class ChatResponse(BaseModel):
@@ -116,6 +147,114 @@ def get_or_create_agent(
     return agents[user_id]
 
 
+async def _process_uploaded_files(
+    files: List[UploadFile],
+) -> tuple[List[Dict], List[Dict]]:
+    """
+    Process uploaded files and return processed files and metadata.
+
+    Returns:
+        Tuple of (processed_files, files_metadata)
+    """
+    processed_files = []
+    files_metadata = []
+
+    for file in files:
+        try:
+            # Read file content
+            file_content = await file.read()
+
+            # Get MIME type
+            mime_type = file.content_type or "application/octet-stream"
+
+            # Process file
+            file_info = FileProcessor.process_file(
+                file_content, file.filename, mime_type
+            )
+            processed_files.append(file_info)
+
+            logger.info(
+                f"[Chat API] Processed file: {file.filename} "
+                f"(Type: {get_file_type_from_mime(file_info['mime_type'])}, "
+                f"MIME: {file_info['mime_type']}, Size: {file_info['size']} bytes)"
+            )
+
+            # Collect metadata
+            files_metadata.append(
+                {
+                    "filename": file_info["filename"],
+                    "type": get_file_type_from_mime(file_info.get("mime_type", "")),
+                    "mime_type": file_info.get("mime_type"),
+                    "size": file_info.get("size"),
+                }
+            )
+
+        except ValueError as e:
+            logger.warning(
+                f"[Chat API] Skipping unsupported file: {file.filename} "
+                f"(MIME: {mime_type}) - {str(e)}"
+            )
+            continue
+        except Exception as e:
+            logger.error(
+                f"[Chat API] Error processing file {file.filename}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error processing file {file.filename}: {str(e)}",
+            )
+
+    return processed_files, files_metadata
+
+
+def _prepare_message_content(
+    message: str,
+    files: Optional[List[UploadFile]],
+    processed_files: List[Dict],
+) -> Union[str, List[Dict]]:
+    """
+    Prepare message content based on text and processed files.
+
+    Returns:
+        Either plain text or multimodal content list
+    """
+    if processed_files:
+        content = FileProcessor.create_langchain_content(message, processed_files)
+        logger.info(
+            f"[Chat API] Created multimodal content with {len(content)} elements"
+        )
+        return content
+    elif files and len(files) > 0:
+        # Fallback to text-only if no files were successfully processed
+        logger.warning(
+            "[Chat API] No files were successfully processed, using text-only"
+        )
+
+    return message
+
+
+def _validate_model_thinking(
+    model: str, include_thoughts: bool, thinking_budget: int
+) -> tuple[bool, int]:
+    """
+    Validate and adjust thinking parameters for the model.
+
+    Returns:
+        Tuple of (include_thoughts, thinking_budget) with validated values
+    """
+    if not model_supports_thinking(model) and (
+        include_thoughts or thinking_budget != 0
+    ):
+        logger.warning(
+            f"[Chat API] Model {model} does not support thinking, "
+            f"disabling thinking features"
+        )
+        return False, 0
+
+    return include_thoughts, thinking_budget
+
+
 @router.get("/models", response_model=ModelsListResponse)
 async def list_models():
     """
@@ -159,103 +298,48 @@ async def send_message(
     - **files**: Optional list of files to upload (images, PDFs, code, documents)
     """
     try:
-        file_count = len(files) if files else 0
-        logger.info(
-            f"[Chat API] Received message from user {user_id} with {file_count} file(s)"
-        )
-
-        # Validate thinking_budget for models that don't support thinking
-        if not model_supports_thinking(model) and (
-            include_thoughts or thinking_budget != 0
-        ):
-            logger.warning(
-                f"[Chat API] Model {model} does not support thinking, "
-                f"disabling thinking features"
-            )
-            include_thoughts = False
-            thinking_budget = 0
-
-        # Get or create agent for this user
-        agent = get_or_create_agent(
+        # Validate request using Pydantic model
+        request = ChatRequest(
+            message=message,
             user_id=user_id,
             system_prompt=system_prompt,
             model=model,
             temperature=temperature,
             include_thoughts=include_thoughts,
             thinking_budget=thinking_budget,
+            session_timeout_seconds=session_timeout_seconds,
+            use_whatsapp_format=use_whatsapp_format,
+        )
+
+        file_count = len(files) if files else 0
+        logger.info(
+            f"[Chat API] Received message from user {request.user_id} with {file_count} file(s)"
+        )
+
+        # Validate and adjust thinking parameters
+        include_thoughts, thinking_budget = _validate_model_thinking(
+            request.model, request.include_thoughts, request.thinking_budget
+        )
+
+        # Get or create agent for this user
+        agent = get_or_create_agent(
+            user_id=request.user_id,
+            system_prompt=request.system_prompt,
+            model=request.model,
+            temperature=request.temperature,
+            include_thoughts=include_thoughts,
+            thinking_budget=thinking_budget,
         )
 
         # Process files if provided
-        content: Union[str, List[Dict]]
+        processed_files = []
         files_metadata = []
 
         if files and len(files) > 0:
-            processed_files = []
-            for file in files:
-                try:
-                    # Read file content
-                    file_content = await file.read()
+            processed_files, files_metadata = await _process_uploaded_files(files)
 
-                    # Get MIME type
-                    mime_type = file.content_type or "application/octet-stream"
-
-                    # Process file
-                    file_info = FileProcessor.process_file(
-                        file_content, file.filename, mime_type
-                    )
-                    processed_files.append(file_info)
-
-                    logger.info(
-                        f"[Chat API] Processed file: {file.filename} "
-                        f"(Type: {get_file_type_from_mime(file_info['mime_type'])}, "
-                        f"MIME: {file_info['mime_type']}, Size: {file_info['size']} bytes)"
-                    )
-
-                    # Collect metadata
-                    files_metadata.append(
-                        {
-                            "filename": file_info["filename"],
-                            "type": get_file_type_from_mime(
-                                file_info.get("mime_type", "")
-                            ),
-                            "mime_type": file_info.get("mime_type"),
-                            "size": file_info.get("size"),
-                        }
-                    )
-
-                except ValueError as e:
-                    logger.warning(
-                        f"[Chat API] Skipping unsupported file: {file.filename} "
-                        f"(MIME: {mime_type}) - {str(e)}"
-                    )
-                    continue
-                except Exception as e:
-                    logger.error(
-                        f"[Chat API] Error processing file {file.filename}: {e}",
-                        exc_info=True,
-                    )
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Error processing file {file.filename}: {str(e)}",
-                    )
-
-            # Create multimodal content if files were processed
-            if processed_files:
-                content = FileProcessor.create_langchain_content(
-                    message, processed_files
-                )
-                logger.info(
-                    f"[Chat API] Created multimodal content with {len(content)} elements"
-                )
-            else:
-                # Fallback to text-only if no files were successfully processed
-                content = message
-                logger.warning(
-                    "[Chat API] No files were successfully processed, using text-only"
-                )
-        else:
-            # No files, use plain text
-            content = message
+        # Prepare message content
+        content = _prepare_message_content(request.message, files, processed_files)
 
         # Prepare data
         data = {"messages": [{"role": "user", "content": content}]}
@@ -264,34 +348,233 @@ async def send_message(
         if files_metadata:
             data["messages"][0]["additional_kwargs"] = {"files": files_metadata}
 
-        config = {"configurable": {"thread_id": user_id}}
+        config = {"configurable": {"thread_id": request.user_id}}
 
         # Query agent
         result = await agent.async_query(input=data, config=config)
-        logger.info(f"AGENT RESULT: {result}")
+
         # Extract response from messages
         messages = result.get("messages", [])
-
-        logger.info(f"[Chat API] Response generated for user {user_id}")
+        logger.info(f"[Chat API] Response generated for user {request.user_id}")
 
         # Format messages
         parsed_messages = to_gateway_format(
             messages=messages,
-            thread_id=user_id,
-            session_timeout_seconds=session_timeout_seconds,
-            use_whatsapp_format=use_whatsapp_format,
+            thread_id=request.user_id,
+            session_timeout_seconds=request.session_timeout_seconds,
+            use_whatsapp_format=request.use_whatsapp_format,
         )
         response_messages = parsed_messages.get("data", {}).get("messages", [])
 
         return ChatResponse(
             messages=response_messages,
-            user_id=user_id,
+            user_id=request.user_id,
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"[Chat API] Error processing message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error processing message: {str(e)}"
+        )
+
+
+@router.post("/message/stream")
+async def send_message_stream(
+    message: str = Form(...),
+    user_id: str = Form(...),
+    system_prompt: str = Form("You are a helpful assistant."),
+    model: str = Form("gemini-2.5-flash"),
+    temperature: float = Form(0.7),
+    include_thoughts: bool = Form(True),
+    thinking_budget: int = Form(-1),
+    session_timeout_seconds: Optional[int] = Form(None),
+    use_whatsapp_format: bool = Form(True),
+    files: List[UploadFile] = File(default=[]),
+):
+    """
+    Send a message to the chat agent with streaming response (Server-Sent Events).
+
+    **Fields:**
+    - **message**: The user's message
+    - **user_id**: Unique identifier for the user
+    - **system_prompt**: Optional system prompt for the agent (default: "You are a helpful assistant.")
+    - **model**: Model to use (default: "gemini-2.5-flash")
+    - **temperature**: Temperature for generation (default: 0.7, range: 0.0-1.0)
+    - **include_thoughts**: Include model thinking process (default: True)
+    - **thinking_budget**: Thinking budget tokens (-1 = unlimited, 0 = disabled, >0 = specific limit)
+    - **session_timeout_seconds**: Optional session timeout in seconds
+    - **use_whatsapp_format**: Whether to use WhatsApp format (default: True)
+    - **files**: Optional list of files to upload (images, PDFs, code, documents)
+
+    **Response:**
+    - Server-Sent Events (SSE) stream with JSON chunks
+    - Each event contains a chunk of the agent's response
+    - Final event signals completion
+    """
+    try:
+        # Validate request using Pydantic model
+        request = ChatRequest(
+            message=message,
+            user_id=user_id,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            include_thoughts=include_thoughts,
+            thinking_budget=thinking_budget,
+            session_timeout_seconds=session_timeout_seconds,
+            use_whatsapp_format=use_whatsapp_format,
+        )
+
+        file_count = len(files) if files else 0
+        logger.info(
+            f"[Chat API Stream] Received message from user {request.user_id} with {file_count} file(s)"
+        )
+
+        # Validate and adjust thinking parameters
+        include_thoughts, thinking_budget = _validate_model_thinking(
+            request.model, request.include_thoughts, request.thinking_budget
+        )
+
+        # Get or create agent for this user
+        agent = get_or_create_agent(
+            user_id=request.user_id,
+            system_prompt=request.system_prompt,
+            model=request.model,
+            temperature=request.temperature,
+            include_thoughts=include_thoughts,
+            thinking_budget=thinking_budget,
+        )
+
+        # Process files if provided
+        processed_files = []
+        files_metadata = []
+
+        if files and len(files) > 0:
+            processed_files, files_metadata = await _process_uploaded_files(files)
+
+        # Prepare message content
+        content = _prepare_message_content(request.message, files, processed_files)
+
+        # Prepare data
+        data = {"messages": [{"role": "user", "content": content}]}
+
+        # Add file metadata to additional_kwargs if files were attached
+        if files_metadata:
+            data["messages"][0]["additional_kwargs"] = {"files": files_metadata}
+
+        config = {"configurable": {"thread_id": request.user_id}}
+
+        # Stream generator
+        async def event_generator():
+            try:
+                # Get streaming response from agent with token-level events (filtered)
+                stream = await agent.async_stream_events_filtered(input=data, config=config)
+
+                # Accumulate messages for final formatting
+                accumulated_messages = []
+                accumulated_content = ""
+
+                # Stream events to client
+                async for event in stream:
+                    event_type = event.get("event")
+                    event_data_payload = event.get("data", {})
+
+                    # Stream token chunks from model
+                    if event_type == "on_chat_model_stream":
+                        chunk_content = event_data_payload.get("chunk")
+                        if chunk_content and hasattr(chunk_content, "content"):
+                            if isinstance(chunk_content.content, str):
+                                # Plain text token
+                                token = chunk_content.content
+                                if token:
+                                    accumulated_content += token
+                                    token_event = json.dumps({
+                                        "type": "token",
+                                        "content": token
+                                    }, ensure_ascii=False)
+                                    yield f"data: {token_event}\n\n"
+                            elif isinstance(chunk_content.content, list) and len(chunk_content.content) > 0:
+                                # Handle multimodal content - can be thinking or text
+                                for item in chunk_content.content:
+                                    if isinstance(item, dict):
+                                        if item.get("type") == "thinking":
+                                            # Stream thinking content
+                                            thinking_token = item.get("thinking", "")
+                                            if thinking_token:
+                                                thinking_event = json.dumps({
+                                                    "type": "thinking_token",
+                                                    "content": thinking_token
+                                                }, ensure_ascii=False)
+                                                yield f"data: {thinking_event}\n\n"
+                                        elif item.get("type") == "text":
+                                            # Stream text content
+                                            text_token = item.get("text", "")
+                                            if text_token:
+                                                accumulated_content += text_token
+                                                token_event = json.dumps({
+                                                    "type": "token",
+                                                    "content": text_token
+                                                }, ensure_ascii=False)
+                                                yield f"data: {token_event}\n\n"
+
+                    # Capture final messages from agent completion
+                    elif event_type == "on_chain_end":
+                        event_name = event.get("name")
+                        if event_name == "LangGraph":  # Main graph completion
+                            output = event_data_payload.get("output", {})
+                            if "messages" in output:
+                                # Messages already filtered by async_stream_events_filtered
+                                accumulated_messages = output["messages"]
+
+                logger.info(
+                    f"[Chat API Stream] Stream completed for user {request.user_id}"
+                )
+
+                # Apply gateway format to accumulated messages
+                if accumulated_messages:
+                    # Messages from astream_events are already LangChain objects, no need to deserialize
+                    parsed_messages = to_gateway_format(
+                        messages=accumulated_messages,
+                        thread_id=request.user_id,
+                        session_timeout_seconds=request.session_timeout_seconds,
+                        use_whatsapp_format=request.use_whatsapp_format,
+                    )
+                    response_messages = parsed_messages.get("data", {}).get(
+                        "messages", []
+                    )
+
+                    # Send formatted messages
+                    formatted_data = json.dumps(
+                        {"type": "formatted", "messages": response_messages},
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {formatted_data}\n\n"
+
+                # Send completion signal
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+            except Exception as e:
+                logger.error(f"[Chat API Stream] Error in stream: {e}", exc_info=True)
+                # Send error event
+                error_data = json.dumps({"type": "error", "error": str(e)})
+                yield f"data: {error_data}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Chat API Stream] Error processing message: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error processing message: {str(e)}"
         )

@@ -11,6 +11,7 @@ import { MessageSquare, History } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import {
   sendChatMessage,
+  sendChatMessageStream,
   ChatRequestPayload,
   getUserHistory,
   HistoryMessage,
@@ -135,6 +136,7 @@ export default function ChatClient() {
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevMessageCountRef = useRef<number>(0);
 
   // Estado para controlar se o componente já foi montado no cliente
   const [isMounted, setIsMounted] = useState(false);
@@ -228,6 +230,7 @@ export default function ChatClient() {
   const [temperature, setTemperature] = useState(0.7);
   const [includeThoughts, setIncludeThoughts] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(-1);
+  const [responseMode, setResponseMode] = useState<'normal' | 'stream'>('normal');
 
   // Available models
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
@@ -237,10 +240,27 @@ export default function ChatClient() {
   const [systemPrompts, setSystemPrompts] = useState<SystemPrompt[]>([]);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
 
+  // Smart auto-scroll: only scroll when new messages are added AND user is near bottom
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    if (!scrollAreaRef.current) return;
+
+    const scrollContainer = scrollAreaRef.current;
+    const totalMessages = messages.length + historyMessages.length;
+    const isNewMessage = totalMessages > prevMessageCountRef.current;
+
+    // Check if user is near bottom (within 100px)
+    const isNearBottom =
+      scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 100;
+
+    // Only auto-scroll if:
+    // 1. A new message was added (not just updated)
+    // 2. AND user is already near the bottom (not reading old messages)
+    if (isNewMessage && isNearBottom) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
+
+    // Update previous count
+    prevMessageCountRef.current = totalMessages;
   }, [messages, historyMessages]);
 
   // Salva o User ID no localStorage quando mudar
@@ -460,30 +480,121 @@ export default function ChatClient() {
         use_whatsapp_format: useWhatsappFormat,
       };
 
-      // Enviar mensagem (com ou sem arquivos)
-      const botResponseData = await sendChatMessage(
-        payload,
-        token,
-        currentFiles.length > 0 ? currentFiles.map(f => f.file) : undefined
-      );
+      // Enviar mensagem (com ou sem arquivos) baseado no modo selecionado
+      if (responseMode === 'stream') {
+        // Modo Stream (SSE)
+        // Criar mensagem de bot inicial vazia para streaming
+        const streamingBotMessage: DisplayMessage = {
+          sender: "bot",
+          content: "",
+          timestamp: new Date().toISOString(),
+          isStreaming: true,
+          streamingThinking: "", // Para acumular thinking durante streaming
+        };
 
-      const latency = (Date.now() - startTime) / 1000;
-      const assistantMessage = botResponseData.messages.find(
-        (m) => m.message_type === "assistant_message"
-      );
+        setMessages((prev) => [...prev, streamingBotMessage]);
+        const streamingMessageIndex = messages.length + 1; // +1 porque já adicionamos a mensagem do usuário
 
-      const botMessage: DisplayMessage = {
-        sender: "bot",
-        content:
-          assistantMessage?.content ||
-          "Não foi possível obter uma resposta do assistente.",
-        fullResponse: botResponseData,
-        timestamp: new Date().toISOString(),
-        latency: latency,
-      };
-      setMessages((prev) => {
-        return [...prev, botMessage];
-      });
+        await sendChatMessageStream(
+          payload,
+          token,
+          currentFiles.length > 0 ? currentFiles.map(f => f.file) : undefined,
+          (chunk) => {
+            // Callback para cada token recebido
+            if (chunk.type === 'token' && chunk.content) {
+              // Token de texto normal
+              setMessages((prev) => {
+                const updated = [...prev];
+                if (updated[streamingMessageIndex]) {
+                  const currentContent = typeof updated[streamingMessageIndex].content === 'string'
+                    ? updated[streamingMessageIndex].content
+                    : '';
+                  updated[streamingMessageIndex] = {
+                    ...updated[streamingMessageIndex],
+                    content: currentContent + chunk.content,
+                  };
+                }
+                return updated;
+              });
+            } else if (chunk.type === 'thinking_token' && chunk.content) {
+              // Token de thinking
+              setMessages((prev) => {
+                const updated = [...prev];
+                if (updated[streamingMessageIndex]) {
+                  const currentThinking = updated[streamingMessageIndex].streamingThinking || '';
+                  updated[streamingMessageIndex] = {
+                    ...updated[streamingMessageIndex],
+                    streamingThinking: currentThinking + chunk.content,
+                  };
+                }
+                return updated;
+              });
+            }
+          },
+          (formattedMessages) => {
+            // Callback quando recebe as mensagens formatadas
+            const latency = (Date.now() - startTime) / 1000;
+            const assistantMessage = formattedMessages.find(
+              (m) => m.message_type === "assistant_message"
+            );
+
+            // Substituir mensagem de streaming pela versão final formatada
+            setMessages((prev) => {
+              const updated = [...prev];
+              if (updated[streamingMessageIndex]) {
+                const currentMsg = updated[streamingMessageIndex];
+                updated[streamingMessageIndex] = {
+                  sender: "bot",
+                  content:
+                    assistantMessage?.content ||
+                    "Não foi possível obter uma resposta do assistente.",
+                  fullResponse: { user_id: userId, messages: formattedMessages },
+                  timestamp: new Date().toISOString(),
+                  latency: latency,
+                  isStreaming: false,
+                  // Preserve thinking data and expansion state
+                  streamingThinking: currentMsg.streamingThinking,
+                  thinkingExpanded: currentMsg.thinkingExpanded,
+                };
+              }
+              return updated;
+            });
+          },
+          () => {
+            // Callback quando stream termina
+            console.log('Stream done');
+          },
+          (error) => {
+            // Callback de erro
+            throw error;
+          }
+        );
+      } else {
+        // Modo Normal
+        const botResponseData = await sendChatMessage(
+          payload,
+          token,
+          currentFiles.length > 0 ? currentFiles.map(f => f.file) : undefined
+        );
+
+        const latency = (Date.now() - startTime) / 1000;
+        const assistantMessage = botResponseData.messages.find(
+          (m) => m.message_type === "assistant_message"
+        );
+
+        const botMessage: DisplayMessage = {
+          sender: "bot",
+          content:
+            assistantMessage?.content ||
+            "Não foi possível obter uma resposta do assistente.",
+          fullResponse: botResponseData,
+          timestamp: new Date().toISOString(),
+          latency: latency,
+        };
+        setMessages((prev) => {
+          return [...prev, botMessage];
+        });
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "An unknown error occurred.";
@@ -1499,6 +1610,43 @@ export default function ChatClient() {
                                             </Tooltip>
                                           </div>
 
+                                          {/* Streaming Thinking Accordion */}
+                                          {msg.streamingThinking && (
+                                            <Accordion
+                                              type="single"
+                                              collapsible
+                                              className="mb-3"
+                                              value={msg.thinkingExpanded ? "thinking" : ""}
+                                              onValueChange={(value) => {
+                                                // Update thinking expanded state
+                                                setMessages((prev) => {
+                                                  const updated = [...prev];
+                                                  updated[index] = {
+                                                    ...updated[index],
+                                                    thinkingExpanded: value === "thinking"
+                                                  };
+                                                  return updated;
+                                                });
+                                              }}
+                                            >
+                                              <AccordionItem value="thinking" className="border rounded-md bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800">
+                                                <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                                                  <div className="flex items-center gap-2">
+                                                    <Lightbulb className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                                                    <span className="text-xs font-semibold text-yellow-700 dark:text-yellow-300">
+                                                      {msg.isStreaming ? "Thinking..." : "Ver Thinking"}
+                                                    </span>
+                                                  </div>
+                                                </AccordionTrigger>
+                                                <AccordionContent className="px-3 pb-3">
+                                                  <div className="text-sm text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap font-mono">
+                                                    {msg.streamingThinking}
+                                                  </div>
+                                                </AccordionContent>
+                                              </AccordionItem>
+                                            </Accordion>
+                                          )}
+
                                           {renderMessageContent(
                                             msg.content || "",
                                             msg.sender === "user"
@@ -1650,6 +1798,8 @@ export default function ChatClient() {
         setThinkingBudget={setThinkingBudget}
         availableModels={availableModels}
         isLoadingModels={isLoadingModels}
+        responseMode={responseMode}
+        setResponseMode={setResponseMode}
         onGenerateNumber={handleGenerateNumber}
         onToggleFixNumber={handleToggleFixNumber}
         onCopyNumber={handleCopyNumber}
