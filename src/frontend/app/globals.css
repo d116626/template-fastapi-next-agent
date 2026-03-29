@@ -27,7 +27,11 @@
   --ring: hsl(222.2 84% 4.9%);
   --radius: 0.5rem;
   --radix-tooltip-open-delay: 100ms;
-  
+
+  /* Thinking colors */
+  --thinking: hsl(210, 40%, 94.1%);                        
+  --thinking-foreground: hsl(220, 4%, 15%);
+
   /* Font Size Variables */
   --font-size-base: 1rem; /* 16px */
   --font-size-sm: 0.9rem; /* ~14.4px */
@@ -44,7 +48,7 @@
   --card-foreground: hsl(220, 14%, 85%); /* Brighter White */
   --popover: hsl(220, 13%, 18%);
   --popover-foreground: hsl(220, 14%, 85%);
-  --primary: hsl(207, 82%, 66%);    /* #61afef */
+  --primary: hsl(207, 100%, 69%);    /* Azul bem mais claro para melhor contraste com texto preto */
   --primary-foreground: hsl(220, 13%, 18%);
   --secondary: hsl(220, 10%, 23%);   /* Gutter Grey #4b5263 */
   --secondary-foreground: hsl(220, 14%, 85%);
@@ -61,6 +65,10 @@
   --border: hsl(220, 10%, 23%);
   --input: hsl(220, 10%, 23%);
   --ring: hsl(207, 82%, 66%);
+
+  /* Thinking colors */
+  --thinking: hsl(220, 10%, 25%);
+  --thinking-foreground: hsl(220, 10%, 82%);
 }
 
 @theme inline {
@@ -84,6 +92,8 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-thinking: var(--thinking);
+  --color-thinking-foreground: var(--thinking-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -103,6 +113,45 @@ body {
 
 .prose a:hover {
     text-decoration: underline;
+}
+
+/* Estilos para listas no prose */
+.prose ul {
+    list-style-type: disc;
+    padding-left: 1.5em;
+    margin: 1em 0;
+}
+
+.prose ol {
+    list-style-type: decimal;
+    padding-left: 1.5em;
+    margin: 1em 0;
+}
+
+.prose li {
+    margin: 0.5em 0;
+}
+
+.prose ul ul,
+.prose ol ul {
+    list-style-type: circle;
+}
+
+.prose ul ul ul,
+.prose ol ul ul,
+.prose ol ol ul {
+    list-style-type: square;
+}
+
+.prose code {
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.dark .prose code {
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Custom Font Size Classes */

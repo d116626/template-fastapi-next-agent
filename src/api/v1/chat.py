@@ -470,7 +470,9 @@ async def send_message_stream(
         async def event_generator():
             try:
                 # Get streaming response from agent with token-level events (filtered)
-                stream = await agent.async_stream_events_filtered(input=data, config=config)
+                stream = await agent.async_stream_events_filtered(
+                    input=data, config=config
+                )
 
                 # Accumulate messages for final formatting
                 accumulated_messages = []
@@ -490,12 +492,15 @@ async def send_message_stream(
                                 token = chunk_content.content
                                 if token:
                                     accumulated_content += token
-                                    token_event = json.dumps({
-                                        "type": "token",
-                                        "content": token
-                                    }, ensure_ascii=False)
+                                    token_event = json.dumps(
+                                        {"type": "token", "content": token},
+                                        ensure_ascii=False,
+                                    )
                                     yield f"data: {token_event}\n\n"
-                            elif isinstance(chunk_content.content, list) and len(chunk_content.content) > 0:
+                            elif (
+                                isinstance(chunk_content.content, list)
+                                and len(chunk_content.content) > 0
+                            ):
                                 # Handle multimodal content - can be thinking or text
                                 for item in chunk_content.content:
                                     if isinstance(item, dict):
@@ -503,20 +508,26 @@ async def send_message_stream(
                                             # Stream thinking content
                                             thinking_token = item.get("thinking", "")
                                             if thinking_token:
-                                                thinking_event = json.dumps({
-                                                    "type": "thinking_token",
-                                                    "content": thinking_token
-                                                }, ensure_ascii=False)
+                                                thinking_event = json.dumps(
+                                                    {
+                                                        "type": "thinking_token",
+                                                        "content": thinking_token,
+                                                    },
+                                                    ensure_ascii=False,
+                                                )
                                                 yield f"data: {thinking_event}\n\n"
                                         elif item.get("type") == "text":
                                             # Stream text content
                                             text_token = item.get("text", "")
                                             if text_token:
                                                 accumulated_content += text_token
-                                                token_event = json.dumps({
-                                                    "type": "token",
-                                                    "content": text_token
-                                                }, ensure_ascii=False)
+                                                token_event = json.dumps(
+                                                    {
+                                                        "type": "token",
+                                                        "content": text_token,
+                                                    },
+                                                    ensure_ascii=False,
+                                                )
                                                 yield f"data: {token_event}\n\n"
 
                     # Capture final messages from agent completion

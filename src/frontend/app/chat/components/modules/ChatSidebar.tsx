@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -122,11 +122,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const [newPromptText, setNewPromptText] = React.useState("");
 
   return (
-    <Card className="flex flex-col h-full">
-      <CardHeader>
-        <CardTitle>Parâmetros</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-y-auto space-y-4">
+    <Card className="flex flex-col min-h-0 overflow-hidden">
+      <CardContent className="flex-1 overflow-y-auto space-y-4 min-h-0 pt-6">
         <div className="space-y-2">
           <Label htmlFor="user-id" className="text-sm">User ID</Label>
           <div className="flex items-center gap-2">

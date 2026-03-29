@@ -4,5 +4,9 @@ import React from 'react';
 import ChatClient from './components/ChatClient';
 
 export default function ChatPage() {
-  return <ChatClient />;
+  return (
+    <div className="h-full w-full p-6 overflow-hidden">
+      <ChatClient />
+    </div>
+  );
 }

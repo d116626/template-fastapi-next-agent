@@ -4,7 +4,6 @@ from typing import List, Dict
 from pathlib import Path
 from src.utils.log import logger
 
-
 _env_cache: Dict[str, str] = {}
 
 
@@ -48,7 +47,7 @@ def _load_dotenv() -> Dict[str, str]:
 
 
 def getenv_or_action(
-    env_name: str, *, action: str = "raise", default: str = None
+    env_name: str, *, action: str = "raise", default: str | None = None
 ) -> str:
     """Get an environment variable or raise an exception.
 

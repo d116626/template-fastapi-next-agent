@@ -4,8 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { MessageSquare, History } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -902,7 +900,7 @@ export default function ChatClient() {
                 return (
                   <div key={`text-${index}`}>
                     <div
-                      className={`prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap break-words overflow-wrap-anywhere ${
+                      className={`prose prose-sm dark:prose-invert max-w-none break-words ${
                         isUser ? "text-primary-foreground user-message-content" : ""
                       }`}
                       style={baseStyles}
@@ -1109,7 +1107,7 @@ export default function ChatClient() {
     return (
       <div className="p-6">
         <div
-          className={`prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap break-words overflow-wrap-anywhere ${
+          className={`prose prose-sm dark:prose-invert max-w-none break-words ${
             isUser ? "text-primary-foreground user-message-content" : ""
           }`}
           style={baseStyles}
@@ -1122,15 +1120,12 @@ export default function ChatClient() {
   };
 
   return (
-    <div className="grid md:grid-cols-[1fr_350px] gap-6 h-full">
+    <div className="grid md:grid-cols-[1fr_350px] gap-6 h-full overflow-hidden">
       {/* Painel do Chat (Esquerda) */}
-      <Card className="flex flex-col h-full overflow-hidden">
-        <CardHeader>
-          <CardTitle>Chat</CardTitle>
-        </CardHeader>
+      <Card className="flex flex-col min-h-0 overflow-hidden">
         <CardContent
           ref={scrollAreaRef}
-          className="flex-1 overflow-y-auto p-4"
+          className="flex-1 overflow-y-auto p-6 min-h-0"
         >
           <div className="space-y-4">
             {/* Mensagens do Histórico */}
@@ -1738,17 +1733,20 @@ export default function ChatClient() {
                                                 });
                                               }}
                                             >
-                                              <AccordionItem value="thinking" className="border rounded-md bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800">
+                                              <AccordionItem
+                                                value="thinking"
+                                                className="border rounded-md border-thinking bg-thinking"
+                                              >
                                                 <AccordionTrigger className="px-3 py-2 hover:no-underline">
                                                   <div className="flex items-center gap-2">
-                                                    <Lightbulb className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                                                    <span className="text-xs font-semibold text-yellow-700 dark:text-yellow-300">
+                                                    <Lightbulb className="h-4 w-4 text-thinking-foreground" />
+                                                    <span className="text-xs font-semibold text-thinking-foreground">
                                                       {msg.isStreaming ? "Thinking..." : "Ver Thinking"}
                                                     </span>
                                                   </div>
                                                 </AccordionTrigger>
                                                 <AccordionContent className="px-3 pb-3">
-                                                  <div className="text-sm text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap font-mono">
+                                                  <div className="text-sm text-thinking-foreground whitespace-pre-wrap font-mono">
                                                     {msg.streamingThinking}
                                                   </div>
                                                 </AccordionContent>
