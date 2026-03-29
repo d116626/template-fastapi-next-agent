@@ -50,70 +50,6 @@ class Agent:
         self._setup_complete_async = False
         self.db_path = db_path or DB_PATH
 
-    def _wrap_tools_with_logging(self, tools: List[BaseTool]) -> List[BaseTool]:
-        """Wrap each tool with logging to capture invocations."""
-        wrapped_tools = []
-
-        for tool in tools:
-            # Create a wrapped version of the tool
-            original_invoke = tool._run
-            original_ainvoke = tool._arun
-
-            def create_sync_wrapper(original_func, tool_name):
-                @wraps(original_func)
-                def sync_wrapper(*args, **kwargs):
-                    logger.info(f"[Tool Invocation] SYNC: Invoking tool: {tool_name}")
-                    try:
-                        result = original_func(*args, **kwargs)
-                        result_str = str(result)
-                        if len(result_str) > 500:
-                            logger.info(
-                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
-                            )
-                        else:
-                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
-                        return result
-                    except Exception as e:
-                        logger.error(
-                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
-                            exc_info=True,
-                        )
-                        raise
-
-                return sync_wrapper
-
-            def create_async_wrapper(original_func, tool_name):
-                @wraps(original_func)
-                async def async_wrapper(*args, **kwargs):
-                    logger.info(f"[Tool Invocation] ASYNC: Invoking tool: {tool_name}")
-                    try:
-                        result = await original_func(*args, **kwargs)
-                        result_str = str(result)
-                        if len(result_str) > 500:
-                            logger.info(
-                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
-                            )
-                        else:
-                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
-                        return result
-                    except Exception as e:
-                        logger.error(
-                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
-                            exc_info=True,
-                        )
-                        raise
-
-                return async_wrapper
-
-            # Wrap the tool methods
-            tool._run = create_sync_wrapper(original_invoke, tool.name)
-            tool._arun = create_async_wrapper(original_ainvoke, tool.name)
-
-            wrapped_tools.append(tool)
-
-        logger.info(f"[Tool Wrapping] Wrapped {len(wrapped_tools)} tools with logging")
-        return wrapped_tools
-
     def _create_react_agent(
         self,
         checkpointer: AsyncSqliteSaver | None = None,
@@ -140,6 +76,93 @@ class Agent:
             checkpointer=checkpointer,
             middleware=[hooks_middleware],
         )
+
+    async def _ensure_async_setup(self):
+        """Ensure async components are set up."""
+
+        if self._setup_complete_async:
+            return
+
+        # Create memory directory if it doesn't exist
+
+        self._checkpointer_cm = AsyncSqliteSaver.from_conn_string(self.db_path)
+        checkpointer = await self._checkpointer_cm.__aenter__()
+        await checkpointer.setup()
+        logger.info(f"[Agent Setup] ✓ SQLite checkpointer created: {self.db_path}")
+
+        self._create_react_agent(checkpointer=checkpointer)
+        logger.info("[Agent Setup] ✓ React agent created successfully (async)")
+        logger.info("[Agent Setup] ========== Agent Setup Complete ==========")
+
+        self._setup_complete_async = True
+
+    async def async_cleanup(self):
+        """Clean up resources, particularly the checkpointer connection."""
+        if self._checkpointer_cm is not None:
+            try:
+                await self._checkpointer_cm.__aexit__(None, None, None)
+                logger.info("[Agent Cleanup] ✓ Checkpointer closed")
+            except Exception as e:
+                logger.error(f"[Agent Cleanup] Error closing checkpointer: {e}")
+            finally:
+                self._checkpointer_cm = None
+
+    async def async_query(self, **kwargs) -> dict[str, Any] | Any:
+        """Asynchronous query execution with filtered current interaction."""
+        kwargs = self._combined_pre_invoke_hook(**kwargs)
+        await self._ensure_async_setup()
+        if self._graph is None:
+            raise ValueError(
+                "Graph is not initialized. Call _ensure_async_setup first."
+            )
+
+        # Debug: Log the config being passed
+        config = kwargs.get("config", {})
+        thread_id = config.get("configurable", {}).get("thread_id")
+        logger.info(f"[async_query] Config: {config}")
+        logger.info(f"[async_query] Thread ID: {thread_id}")
+
+        type = kwargs.pop("type", None)
+        if type == "history":
+            # Bypass filtering for history requests
+            try:
+                self._graph.update_state(
+                    config=kwargs.get("config", {}), values=kwargs.get("input", {})
+                )
+                return {
+                    "status_code": 200,
+                    "status": "history updated",
+                    "message": None,
+                }
+            except Exception as e:
+                return {"status_code": 500, "status": "error", "message": str(e)}
+        result = await self._graph.ainvoke(**kwargs)
+        filtered_result = self._filter_current_interaction(result)
+
+        return filtered_result
+
+    async def async_stream_query(self, **kwargs) -> AsyncIterable[Any]:
+        """Asynchronous streaming query execution with filtered chunks."""
+        kwargs = self._combined_pre_invoke_hook(**kwargs)
+
+        async def async_generator() -> AsyncIterable[Any]:
+            await self._ensure_async_setup()
+            if self._graph is None:
+                raise ValueError(
+                    "Graph is not initialized. Call _ensure_async_setup first."
+                )
+            async for chunk in self._graph.astream(**kwargs):
+                filtered_chunk = self._filter_streaming_chunk(chunk)
+                yield dumpd(filtered_chunk)
+
+        return async_generator()
+
+    def _combined_pre_invoke_hook(self, **kwargs):
+        """Centralizes all manipulations on input arguments before invoking the graph."""
+        kwargs = self._add_timestamp_to_input_messages(**kwargs)
+        kwargs = self._sanitize_input_messages(**kwargs)
+        kwargs = self._inject_thread_id_into_state(**kwargs)
+        return kwargs
 
     def _create_hooks_middleware(self):
         """Create a single middleware that consolidates all pre/post model hooks."""
@@ -259,19 +282,25 @@ class Agent:
         tool_names_expecting_user_id = set()
         for tool in self._tools:
             # Check if tool has user_id parameter
-            if hasattr(tool, 'args_schema') and tool.args_schema:
+            if hasattr(tool, "args_schema") and tool.args_schema:
                 schema = tool.args_schema
 
-                if hasattr(schema, '__fields__') and 'user_id' in schema.__fields__:
+                if hasattr(schema, "__fields__") and "user_id" in schema.__fields__:
                     tool_names_expecting_user_id.add(tool.name)
-                elif hasattr(schema, 'model_fields') and 'user_id' in schema.model_fields:
+                elif (
+                    hasattr(schema, "model_fields") and "user_id" in schema.model_fields
+                ):
                     tool_names_expecting_user_id.add(tool.name)
-            elif hasattr(tool, 'args') and isinstance(tool.args, dict) and 'user_id' in tool.args:
+            elif (
+                hasattr(tool, "args")
+                and isinstance(tool.args, dict)
+                and "user_id" in tool.args
+            ):
                 tool_names_expecting_user_id.add(tool.name)
 
         # Inject thread_id into matching tool calls
         for tool_call in message.tool_calls:
-            tool_name = tool_call.get('name')
+            tool_name = tool_call.get("name")
 
             # If tool expects user_id, inject thread_id
             if tool_name in tool_names_expecting_user_id:
@@ -283,7 +312,9 @@ class Agent:
 
                 # Inject thread_id as user_id
                 tool_call["args"]["user_id"] = thread_id
-                logger.info(f"[Thread ID] Injected thread_id '{thread_id}' into tool call '{tool_name}'")
+                logger.info(
+                    f"[Thread ID] Injected thread_id '{thread_id}' into tool call '{tool_name}'"
+                )
 
     def _log_tool_calls(self, message):
         """Log tool calls if present in the message."""
@@ -302,115 +333,69 @@ class Agent:
                 )
                 logger.info(f"[Tool Execution]   - Full Tool Call: {tool_call}")
 
+    def _wrap_tools_with_logging(self, tools: List[BaseTool]) -> List[BaseTool]:
+        """Wrap each tool with logging to capture invocations."""
+        wrapped_tools = []
 
-    async def _ensure_async_setup(self):
-        """Ensure async components are set up."""
+        for tool in tools:
+            # Create a wrapped version of the tool
+            original_invoke = tool._run
+            original_ainvoke = tool._arun
 
-        if self._setup_complete_async:
-            return
+            def create_sync_wrapper(original_func, tool_name):
+                @wraps(original_func)
+                def sync_wrapper(*args, **kwargs):
+                    logger.info(f"[Tool Invocation] SYNC: Invoking tool: {tool_name}")
+                    try:
+                        result = original_func(*args, **kwargs)
+                        result_str = str(result)
+                        if len(result_str) > 500:
+                            logger.info(
+                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
+                            )
+                        else:
+                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
+                        return result
+                    except Exception as e:
+                        logger.error(
+                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
+                            exc_info=True,
+                        )
+                        raise
 
-        # Create memory directory if it doesn't exist
+                return sync_wrapper
 
-        self._checkpointer_cm = AsyncSqliteSaver.from_conn_string(self.db_path)
-        checkpointer = await self._checkpointer_cm.__aenter__()
-        await checkpointer.setup()
-        logger.info(f"[Agent Setup] ✓ SQLite checkpointer created: {self.db_path}")
+            def create_async_wrapper(original_func, tool_name):
+                @wraps(original_func)
+                async def async_wrapper(*args, **kwargs):
+                    logger.info(f"[Tool Invocation] ASYNC: Invoking tool: {tool_name}")
+                    try:
+                        result = await original_func(*args, **kwargs)
+                        result_str = str(result)
+                        if len(result_str) > 500:
+                            logger.info(
+                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
+                            )
+                        else:
+                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
+                        return result
+                    except Exception as e:
+                        logger.error(
+                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
+                            exc_info=True,
+                        )
+                        raise
 
-        self._create_react_agent(checkpointer=checkpointer)
-        logger.info("[Agent Setup] ✓ React agent created successfully (async)")
-        logger.info("[Agent Setup] ========== Agent Setup Complete ==========")
+                return async_wrapper
 
-        self._setup_complete_async = True
+            # Wrap the tool methods
+            tool._run = create_sync_wrapper(original_invoke, tool.name)
+            tool._arun = create_async_wrapper(original_ainvoke, tool.name)
 
-    async def async_cleanup(self):
-        """Clean up resources, particularly the checkpointer connection."""
-        if self._checkpointer_cm is not None:
-            try:
-                await self._checkpointer_cm.__aexit__(None, None, None)
-                logger.info("[Agent Cleanup] ✓ Checkpointer closed")
-            except Exception as e:
-                logger.error(f"[Agent Cleanup] Error closing checkpointer: {e}")
-            finally:
-                self._checkpointer_cm = None
+            wrapped_tools.append(tool)
 
-    async def async_query(self, **kwargs) -> dict[str, Any] | Any:
-        """Asynchronous query execution with filtered current interaction."""
-        kwargs = self._combined_pre_invoke_hook(**kwargs)
-        await self._ensure_async_setup()
-        if self._graph is None:
-            raise ValueError(
-                "Graph is not initialized. Call _ensure_async_setup first."
-            )
-
-        # Debug: Log the config being passed
-        config = kwargs.get("config", {})
-        thread_id = config.get("configurable", {}).get("thread_id")
-        logger.info(f"[async_query] Config: {config}")
-        logger.info(f"[async_query] Thread ID: {thread_id}")
-
-        type = kwargs.pop("type", None)
-        if type == "history":
-            # Bypass filtering for history requests
-            try:
-                self._graph.update_state(
-                    config=kwargs.get("config", {}), values=kwargs.get("input", {})
-                )
-                return {
-                    "status_code": 200,
-                    "status": "history updated",
-                    "message": None,
-                }
-            except Exception as e:
-                return {"status_code": 500, "status": "error", "message": str(e)}
-        result = await self._graph.ainvoke(**kwargs)
-        filtered_result = self._filter_current_interaction(result)
-
-        return filtered_result
-
-    async def async_stream_query(self, **kwargs) -> AsyncIterable[Any]:
-        """Asynchronous streaming query execution with filtered chunks."""
-        kwargs = self._combined_pre_invoke_hook(**kwargs)
-
-        async def async_generator() -> AsyncIterable[Any]:
-            await self._ensure_async_setup()
-            if self._graph is None:
-                raise ValueError(
-                    "Graph is not initialized. Call _ensure_async_setup first."
-                )
-            async for chunk in self._graph.astream(**kwargs):
-                filtered_chunk = self._filter_streaming_chunk(chunk)
-                yield dumpd(filtered_chunk)
-
-        return async_generator()
-
-    def _filter_streaming_chunk(self, chunk: dict) -> dict:
-        """Applies interaction filter to a streaming chunk if applicable."""
-        if isinstance(chunk, dict) and "messages" in chunk:
-            return self._filter_current_interaction(chunk)
-        return chunk
-
-    def _filter_current_interaction(self, result: dict) -> dict:
-        """Filters response to include only messages from the last human input."""
-        if "messages" not in result or not isinstance(result["messages"], list):
-            return result
-        messages = result["messages"]
-        last_human_index = -1
-        for i, msg in reversed(list(enumerate(messages))):
-            if isinstance(msg, HumanMessage):
-                last_human_index = i
-                break
-        if last_human_index == -1:
-            return result
-        filtered_result = result.copy()
-        filtered_result["messages"] = messages[last_human_index:]
-        return filtered_result
-
-    def _combined_pre_invoke_hook(self, **kwargs):
-        """Centralizes all manipulations on input arguments before invoking the graph."""
-        kwargs = self._add_timestamp_to_input_messages(**kwargs)
-        kwargs = self._sanitize_input_messages(**kwargs)
-        kwargs = self._inject_thread_id_into_state(**kwargs)
-        return kwargs
+        logger.info(f"[Tool Wrapping] Wrapped {len(wrapped_tools)} tools with logging")
+        return wrapped_tools
 
     def _inject_thread_id_into_state(self, **kwargs):
         """Inject thread_id from config into the state so middleware can access it."""
@@ -429,7 +414,6 @@ class Agent:
         for message in kwargs["input"]["messages"]:
             message["additional_kwargs"] = {"timestamp": msg_datetime}
         return kwargs
-
 
     def _sanitize_input_messages(self, **kwargs):
         """Sanitizes input messages to prevent Vertex AI errors with integer lists in strings.
@@ -474,3 +458,24 @@ class Agent:
                     pass
         return kwargs
 
+    def _filter_current_interaction(self, result: dict) -> dict:
+        """Filters response to include only messages from the last human input."""
+        if "messages" not in result or not isinstance(result["messages"], list):
+            return result
+        messages = result["messages"]
+        last_human_index = -1
+        for i, msg in reversed(list(enumerate(messages))):
+            if isinstance(msg, HumanMessage):
+                last_human_index = i
+                break
+        if last_human_index == -1:
+            return result
+        filtered_result = result.copy()
+        filtered_result["messages"] = messages[last_human_index:]
+        return filtered_result
+
+    def _filter_streaming_chunk(self, chunk: dict) -> dict:
+        """Applies interaction filter to a streaming chunk if applicable."""
+        if isinstance(chunk, dict) and "messages" in chunk:
+            return self._filter_current_interaction(chunk)
+        return chunk
