@@ -7,10 +7,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 import aiosqlite
 
 from src.utils.log import logger
-
-# Memory path (same as agent_old.py)
-MEMORY_PATH = Path(__file__).parent / "memory"
-DB_PATH = str(MEMORY_PATH / "checkpoint.db")
+from src.db.memory import DB_PATH
 
 
 async def get_thread_history(thread_id: str, limit: Optional[int] = None) -> List:
@@ -68,7 +65,9 @@ async def delete_thread_history(thread_id: str) -> bool:
         # Use direct SQL because AsyncSqliteSaver.adelete_thread() doesn't commit
         async with aiosqlite.connect(DB_PATH) as conn:
             # Delete from both tables
-            await conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+            await conn.execute(
+                "DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,)
+            )
             await conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
             await conn.commit()
 

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap, Plus, Edit, FileText } from 'lucide-react';
+import { RefreshCw, Lock, Unlock, Copy, History, Loader2, MessageSquare, Eraser, Trash2, Clock, Settings, Brain, Zap, Plus, Edit, FileText, Download } from 'lucide-react';
 import { HistoryMessage, ModelInfo, SystemPrompt } from '../../services/api';
 
 interface ChatSidebarProps {
@@ -57,6 +57,7 @@ interface ChatSidebarProps {
   onCreatePrompt: (name: string, prompt: string) => Promise<void>;
   onUpdatePrompt: (id: string, name?: string, prompt?: string) => Promise<void>;
   onDeletePrompt: (id: string) => Promise<void>;
+  onExportConversation: (format: 'markdown' | 'json' | 'text') => void;
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -99,6 +100,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onCreatePrompt,
   onUpdatePrompt,
   onDeletePrompt,
+  onExportConversation,
 }) => {
   // Check if current model supports thinking
   const currentModelInfo = availableModels.find(m => m.code === model);
@@ -558,6 +560,43 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               <Eraser className="h-4 w-4 mr-2" />
               Limpar Tela
             </Button>
+
+            {/* Export buttons */}
+            <div className="space-y-2 pt-2 border-t">
+              <Label className="text-sm font-medium">Exportar Conversa</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  onClick={() => onExportConversation('markdown')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como Markdown"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  MD
+                </Button>
+                <Button
+                  onClick={() => onExportConversation('json')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como JSON"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  JSON
+                </Button>
+                <Button
+                  onClick={() => onExportConversation('text')}
+                  disabled={!isMounted}
+                  className="h-9 text-xs"
+                  variant="outline"
+                  title="Exportar como Texto"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  TXT
+                </Button>
+              </div>
+            </div>
 
             <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
               <DialogTrigger asChild>

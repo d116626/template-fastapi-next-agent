@@ -200,6 +200,28 @@ class Agent:
 
         return filtered_result
 
+    async def async_stream_query(self, **kwargs) -> AsyncIterable[Any]:
+        """Asynchronous streaming query execution with filtered chunks."""
+        kwargs = self._combined_pre_invoke_hook(**kwargs)
+
+        async def async_generator() -> AsyncIterable[Any]:
+            await self._ensure_async_setup()
+            if self._graph is None:
+                raise ValueError(
+                    "Graph is not initialized. Call _ensure_async_setup first."
+                )
+            async for chunk in self._graph.astream(**kwargs):
+                filtered_chunk = self._filter_streaming_chunk(chunk)
+                yield dumpd(filtered_chunk)
+
+        return async_generator()
+
+    def _filter_streaming_chunk(self, chunk: dict) -> dict:
+        """Applies interaction filter to a streaming chunk if applicable."""
+        if isinstance(chunk, dict) and "messages" in chunk:
+            return self._filter_current_interaction(chunk)
+        return chunk
+
     def _filter_current_interaction(self, result: dict) -> dict:
         """Filters response to include only messages from the last human input."""
         if "messages" not in result or not isinstance(result["messages"], list):

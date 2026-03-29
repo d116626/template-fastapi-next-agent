@@ -26,6 +26,7 @@ import {
 } from "../services/api";
 import { marked } from "marked";
 import { toast } from "sonner";
+import { parseMarkdownWithCode, hasCodeBlocks } from "../utils/markdown";
 
 import { DisplayMessage, MultimodalContent, MultimodalContentItem } from "../types/chat";
 
@@ -142,19 +143,30 @@ export default function ChatClient() {
   const [userId, setUserId] = useState("");
   const [isUserIdFixed, setIsUserIdFixed] = useState(false);
 
-  // Inicializa os estados após a montagem no cliente
+  // Inicializa User ID e cadeado apenas uma vez no mount
   useEffect(() => {
     setIsMounted(true);
 
-    // Recupera o User ID do localStorage ou gera um novo
+    // Recupera o User ID e estado do cadeado do localStorage
     const savedUserId = localStorage.getItem("chat-user-id");
-    setUserId(savedUserId || generateRandomNumber());
-
-    // Recupera o estado do cadeado do localStorage
     const savedFixed = localStorage.getItem("chat-user-id-fixed") === "true";
-    setIsUserIdFixed(savedFixed);
 
-    // Buscar modelos disponíveis
+    // Define o User ID
+    if (savedUserId) {
+      // Se existe um User ID salvo, usa ele
+      setUserId(savedUserId);
+    } else if (!savedFixed) {
+      // Só gera um novo número se não estiver travado
+      setUserId(generateRandomNumber());
+    }
+    // Se não tem savedUserId E está travado, mantém vazio (userId = "")
+
+    // Define o estado do cadeado
+    setIsUserIdFixed(savedFixed);
+  }, []); // Roda apenas uma vez no mount
+
+  // Buscar modelos e prompts quando o token mudar
+  useEffect(() => {
     const fetchModels = async () => {
       if (!token) return;
 
@@ -170,7 +182,6 @@ export default function ChatClient() {
       }
     };
 
-    // Buscar system prompts disponíveis
     const fetchPrompts = async () => {
       if (!token) return;
 
@@ -339,6 +350,31 @@ export default function ChatClient() {
       setSelectedPromptId(promptId);
       setSystemPrompt(prompt.prompt);
     }
+  };
+
+  // Export conversation handler
+  const handleExportConversation = (format: 'markdown' | 'json' | 'text') => {
+    const { exportConversation } = require('../utils/export');
+
+    // Combinar histórico e mensagens atuais
+    const historyMessagesFormatted: DisplayMessage[] = historyMessages
+      .filter(msg => msg.message_type === 'user_message' || msg.message_type === 'assistant_message')
+      .map(msg => ({
+        sender: msg.message_type === 'user_message' ? 'user' : 'bot',
+        content: msg.content || '',
+        timestamp: msg.date,
+        latency: undefined,
+      }));
+
+    const allMessages = [...historyMessagesFormatted, ...messages];
+
+    if (allMessages.length === 0) {
+      toast.error('Nenhuma mensagem para exportar');
+      return;
+    }
+
+    exportConversation(allMessages, userId, format);
+    toast.success(`Conversa exportada como ${format.toUpperCase()}!`);
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -609,12 +645,28 @@ export default function ChatClient() {
       const mediaItems = content.filter(item => item.type === "media" || item.type === "image_url");
 
       return (
-        <div className="p-4 pr-12">
+        <div className="p-6">
           {/* Texto primeiro */}
           {textItems.length > 0 && (
             <div className="space-y-2">
               {textItems.map((item: any, index: number) => {
-                const parsed = marked.parse(item.text, { breaks: true }) as string;
+                const text = item.text;
+                const isDarkMode = typeof window !== 'undefined'
+                  ? document.documentElement.classList.contains('dark')
+                  : false;
+
+                // Check if text contains code blocks
+                if (hasCodeBlocks(text)) {
+                  const elements = parseMarkdownWithCode(text, isDarkMode, isUser);
+                  return (
+                    <div key={`text-${index}`}>
+                      {elements}
+                    </div>
+                  );
+                }
+
+                // Fallback to regular markdown parsing
+                const parsed = marked.parse(text, { breaks: true }) as string;
                 const styledHTML = parsed.replace(
                   /<pre><code class="language-json">/g,
                   `<pre style="background-color: transparent; padding: 1rem; border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"><code class="language-json" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">`
@@ -630,7 +682,7 @@ export default function ChatClient() {
                 return (
                   <div key={`text-${index}`}>
                     <div
-                      className={`prose prose-sm dark:prose-invert whitespace-pre-wrap prose-base-custom break-words overflow-wrap-anywhere ${
+                      className={`prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap break-words overflow-wrap-anywhere ${
                         isUser ? "text-primary-foreground user-message-content" : ""
                       }`}
                       style={baseStyles}
@@ -805,6 +857,21 @@ export default function ChatClient() {
 
     // Handle plain text content (string)
     const textContent = typeof content === "string" ? content : String(content || "");
+    const isDarkMode = typeof window !== 'undefined'
+      ? document.documentElement.classList.contains('dark')
+      : false;
+
+    // Check if text contains code blocks
+    if (hasCodeBlocks(textContent)) {
+      const elements = parseMarkdownWithCode(textContent, isDarkMode, isUser);
+      return (
+        <div className="p-6">
+          {elements}
+        </div>
+      );
+    }
+
+    // Fallback to regular markdown parsing
     const parsed = marked.parse(textContent, { breaks: true }) as string;
 
     const styledHTML = parsed.replace(
@@ -820,15 +887,17 @@ export default function ChatClient() {
         } as React.CSSProperties;
 
     return (
-      <div
-        className={`prose prose-base dark:prose-invert p-4 pr-12 whitespace-pre-wrap prose-base-custom break-words overflow-wrap-anywhere ${
-          isUser ? "text-primary-foreground user-message-content" : ""
-        }`}
-        style={baseStyles}
-        dangerouslySetInnerHTML={{
-          __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
-        }}
-      />
+      <div className="p-6">
+        <div
+          className={`prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap break-words overflow-wrap-anywhere ${
+            isUser ? "text-primary-foreground user-message-content" : ""
+          }`}
+          style={baseStyles}
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
+          }}
+        />
+      </div>
     );
   };
 
@@ -990,35 +1059,36 @@ export default function ChatClient() {
 
                                   return null;
                                 })()}
+
+                                {/* Copy button */}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className={`ml-auto h-6 w-6 ${
+                                        msg.message_type === "user_message"
+                                          ? "text-white/70 hover:text-white hover:bg-white/10"
+                                          : "text-foreground/50 hover:text-foreground hover:bg-muted"
+                                      }`}
+                                      onClick={() =>
+                                        copyToClipboard(msg.content)
+                                      }
+                                    >
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+
+                                  <TooltipContent>
+                                    <p>Copiar mensagem do histórico</p>
+                                  </TooltipContent>
+                                </Tooltip>
                               </div>
 
                               {renderMessageContent(
                                 msg.content || "",
                                 msg.message_type === "user_message"
                               )}
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className={`absolute top-8 right-2 border ${
-                                      msg.message_type === "user_message"
-                                        ? "bg-white/20 hover:bg-white/30 border-white/30 hover:border-white/40 text-white"
-                                        : "bg-primary/10 hover:bg-primary/20 border-primary/20 hover:border-primary/30 text-primary"
-                                    }`}
-                                    onClick={() =>
-                                      copyToClipboard(msg.content)
-                                    }
-                                  >
-                                    <Copy className="h-3 w-3" />
-                                  </Button>
-                                </TooltipTrigger>
-
-                                <TooltipContent>
-                                  <p>Copiar mensagem do histórico</p>
-                                </TooltipContent>
-                              </Tooltip>
                             </div>
 
                             {msg.message_type === "assistant_message" && (
@@ -1202,12 +1272,12 @@ export default function ChatClient() {
                                                           </p>
 
                                                           <div
-                                                            className="prose prose-sm dark:prose-invert max-w-none bg-muted/30 p-2 rounded"
+                                                            className="prose prose-lg dark:prose-invert max-w-none bg-muted/30 p-2 rounded"
                                                             dangerouslySetInnerHTML={{
                                                               __html:
                                                                 DOMPurify.sanitize(
                                                                   marked.parse(
-                                                                    step.content,
+                                                                    typeof step.content === 'string' ? step.content : extractTextFromContent(step.content),
                                                                     {
                                                                       breaks:
                                                                         true,
@@ -1406,32 +1476,33 @@ export default function ChatClient() {
                                               }
                                               return null;
                                             })()}
+
+                                            {/* Copy button */}
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  className={`ml-auto h-6 w-6 ${
+                                                    msg.sender === "user"
+                                                      ? "text-white/70 hover:text-white hover:bg-white/10"
+                                                      : "text-foreground/50 hover:text-foreground hover:bg-muted"
+                                                  }`}
+                                                  onClick={() => copyToClipboard(msg.content)}
+                                                >
+                                                  <Copy className="h-3.5 w-3.5" />
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent>
+                                                <p>Copiar mensagem</p>
+                                              </TooltipContent>
+                                            </Tooltip>
                                           </div>
-                  
+
                                           {renderMessageContent(
                                             msg.content || "",
                                             msg.sender === "user"
                                           )}
-                  
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className={`absolute top-8 right-2 border ${
-                                                  msg.sender === "user"
-                                                    ? "bg-white/20 hover:bg-white/30 border-white/30 hover:border-white/40 text-white"
-                                                    : "bg-primary/10 hover:bg-primary/20 border-primary/20 hover:border-primary/30 text-primary"
-                                                }`}
-                                                onClick={() => copyToClipboard(msg.content)}
-                                              >
-                                                <Copy className="h-3 w-3" />
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                              <p>Copiar mensagem</p>
-                                            </TooltipContent>
-                                          </Tooltip>
                                         </div>
                                         {msg.sender === "bot" && msg.fullResponse && (
                                           <div className="mt-3 pt-3 border-t border-muted/30">
@@ -1510,15 +1581,17 @@ export default function ChatClient() {
                                                         )}
                                                       </div>
                                                     ))}
-                                                  <div className="space-y-2 pt-2 border-t">
-                                                    <div className="flex items-center gap-2">
-                                                      <BarChart2 className="h-4 w-4 text-purple-500" />
-                                                      <h4 className="font-semibold">
-                                                        Usage Statistics
-                                                      </h4>
+                                                  {msg.fullResponse.usage && (
+                                                    <div className="space-y-2 pt-2 border-t">
+                                                      <div className="flex items-center gap-2">
+                                                        <BarChart2 className="h-4 w-4 text-purple-500" />
+                                                        <h4 className="font-semibold">
+                                                          Usage Statistics
+                                                        </h4>
+                                                      </div>
+                                                      <JsonViewer data={msg.fullResponse.usage} />
                                                     </div>
-                                                    <JsonViewer data={msg.fullResponse.usage} />
-                                                  </div>
+                                                  )}
                                                 </AccordionContent>
                                               </AccordionItem>
                                             </Accordion>
@@ -1592,6 +1665,7 @@ export default function ChatClient() {
         onCreatePrompt={handleCreatePrompt}
         onUpdatePrompt={handleUpdatePrompt}
         onDeletePrompt={handleDeletePrompt}
+        onExportConversation={handleExportConversation}
       />
 
       {/* Image Modal */}

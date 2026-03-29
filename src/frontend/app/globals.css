@@ -29,11 +29,11 @@
   --radix-tooltip-open-delay: 100ms;
   
   /* Font Size Variables */
-  --font-size-base: 0.9rem; /* 16px */
-  --font-size-sm: 0.875rem; /* 14px */
-  --font-size-xs: 0.75rem; /* 12px */
-  --font-size-lg: 1.125rem; /* 18px */
-  --font-size-xl: 1.25rem; /* 20px */
+  --font-size-base: 1rem; /* 16px */
+  --font-size-sm: 0.9rem; /* ~14.4px */
+  --font-size-xs: 0.8rem; /* ~12.8px */
+  --font-size-lg: 1.25rem; /* 20px */
+  --font-size-xl: 1.5rem; /* 24px */
 }
 
 .dark {
@@ -94,7 +94,7 @@ body {
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .prose a {

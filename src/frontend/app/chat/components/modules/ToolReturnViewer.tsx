@@ -100,7 +100,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Descrição Completa</h5>
                           <div
-                            className="prose prose-sm dark:prose-invert max-w-none"
+                            className="prose prose-lg dark:prose-invert max-w-none"
                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.descricao_completa, { breaks: true }) as string) }}
                           />
                         </div>
@@ -169,7 +169,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Instruções ao Solicitante</h5>
                           <div
-                            className="prose prose-sm dark:prose-invert max-w-none"
+                            className="prose prose-lg dark:prose-invert max-w-none"
                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.instrucoes_solicitante, { breaks: true }) as string) }}
                           />
                         </div>
@@ -180,7 +180,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Resultado da Solicitação</h5>
                           <div
-                            className="prose prose-sm dark:prose-invert max-w-none"
+                            className="prose prose-lg dark:prose-invert max-w-none"
                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.resultado_solicitacao, { breaks: true }) as string) }}
                           />
                         </div>
@@ -191,7 +191,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">O que o serviço NÃO cobre</h5>
                           <div
-                            className="prose prose-sm dark:prose-invert max-w-none"
+                            className="prose prose-lg dark:prose-invert max-w-none"
                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.servico_nao_cobre, { breaks: true }) as string) }}
                           />
                         </div>
@@ -285,7 +285,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         <AccordionContent>
                           {typeof value === 'string' ? (
                             <div
-                              className="prose prose-base dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
+                              className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
                               dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(value, { breaks: true }) as string) }}
                             />
                           ) : (
@@ -298,7 +298,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                     </Accordion>
                   ) : typeof value === 'string' ? (
                     <div
-                      className="prose prose-base dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
+                      className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
                       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(value, { breaks: true }) as string) }}
                     />
                   ) : (
@@ -332,7 +332,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Próximas Instruções</h5>
               <div className="pl-4">
                 <div
-                  className="prose prose-base dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
+                  className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(toolReturnData.next_tool_instructions || toolReturnData.next_too_instructions || '', { breaks: true }) as string) }}
                 />
               </div>
@@ -365,7 +365,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                     {/* Renderiza instruções se existir */}
                     {item.instrucoes && typeof item.instrucoes === 'string' && (
                       <div
-                        className="prose prose-base dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
+                        className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
                         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(item.instrucoes, { breaks: true }) as string) }}
                       />
                     )}
@@ -479,7 +479,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
               <p className="font-semibold text-base-custom capitalize">{key.replace(/_/g, ' ')}:</p>
               {key.toLowerCase().includes('text') || key.toLowerCase().includes('markdown') ? (
                 <div 
-                  className="prose prose-base dark:prose-invert max-w-full prose-base-custom"
+                  className="prose prose-lg dark:prose-invert max-w-full prose-base-custom"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(String(value)) as string) }}
                 />
               ) : (

@@ -268,7 +268,7 @@ async def send_message(
 
         # Query agent
         result = await agent.async_query(input=data, config=config)
-
+        logger.info(f"AGENT RESULT: {result}")
         # Extract response from messages
         messages = result.get("messages", [])
 

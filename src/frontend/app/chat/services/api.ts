@@ -69,15 +69,21 @@ export interface AgentMessage {
   id: string;
   date: string;
   name: string | null;
-  message_type: 'tool_call_message' | 'tool_return_message' | 'assistant_message' | 'user_message';
+  message_type: 'tool_call_message' | 'tool_return_message' | 'assistant_message' | 'user_message' | 'reasoning_message' | 'usage_statistics';
   tool_call?: ToolCall;
   tool_return?: ToolReturn;
   content?: string | any[]; // Can be string or multimodal array
+  reasoning?: string; // For reasoning_message type
+  session_id?: string; // Session identifier for history grouping
+  model_name?: string; // Model used for this message
+  finish_reason?: string; // Reason the message generation finished
+  usage_metadata?: Record<string, any>; // Token usage and other metadata
 }
 
 export interface ChatResponseData {
   user_id: string;
   messages: AgentMessage[];
+  usage?: Record<string, any>; // Usage statistics for the conversation
 }
 
 // --- History Interfaces ---
