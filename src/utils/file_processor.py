@@ -45,7 +45,7 @@ class FileStorage:
     @staticmethod
     def save_file(content: bytes, filename: str, mime_type: str) -> str:
         """
-        Salva arquivo e retorna hash curto (8 chars).
+        Salva arquivo e retorna ID curto (8 chars).
 
         Args:
             content: Bytes do arquivo
@@ -66,26 +66,40 @@ class FileStorage:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO files
-            (file_hash, filename, mime_type, size, content_base64)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (file_hash, filename, mime_type, len(content), content_b64),
-        )
+        try:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO files
+                (file_hash, filename, mime_type, size, content_base64)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (file_hash, filename, mime_type, len(content), content_b64),
+            )
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+            logger.info(f"[FileStorage] Saved file: {filename} (ID: {file_hash})")
 
-        logger.info(f"[FileStorage] Saved file: {filename} (hash: {file_hash})")
+        except sqlite3.OperationalError as e:
+            # Se a tabela não existe, inicializar e tentar novamente
+            if "no such table" in str(e):
+                logger.warning(
+                    "[FileStorage] Table not found, initializing database..."
+                )
+                conn.close()
+                FileStorage.init_db()
+                # Retry
+                return FileStorage.save_file(content, filename, mime_type)
+            else:
+                raise
+        finally:
+            conn.close()
 
         return file_hash
 
     @staticmethod
     def get_file(file_hash: str) -> Optional[Dict[str, Any]]:
         """
-        Recupera arquivo pelo hash.
+        Recupera arquivo pelo ID.
 
         Returns:
             {
@@ -99,30 +113,44 @@ class FileStorage:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
-            SELECT file_hash, filename, mime_type, content_base64
-            FROM files
-            WHERE file_hash = ?
-        """,
-            (file_hash,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT file_hash, filename, mime_type, content_base64
+                FROM files
+                WHERE file_hash = ?
+            """,
+                (file_hash,),
+            )
 
-        row = cursor.fetchone()
-        conn.close()
+            row = cursor.fetchone()
 
-        if not row:
-            return None
+            if not row:
+                return None
 
-        # Decode base64
-        content = base64.b64decode(row["content_base64"])
+            # Decode base64
+            content = base64.b64decode(row["content_base64"])
 
-        return {
-            "file_hash": row["file_hash"],
-            "filename": row["filename"],
-            "mime_type": row["mime_type"],
-            "content": content,
-        }
+            return {
+                "file_hash": row["file_hash"],
+                "filename": row["filename"],
+                "mime_type": row["mime_type"],
+                "content": content,
+            }
+
+        except sqlite3.OperationalError as e:
+            # Se a tabela não existe, inicializar
+            if "no such table" in str(e):
+                logger.warning(
+                    "[FileStorage] Table not found, initializing database..."
+                )
+                conn.close()
+                FileStorage.init_db()
+                return None  # Arquivo não existe após inicialização
+            else:
+                raise
+        finally:
+            conn.close()
 
 
 # Initialize database on import
@@ -304,12 +332,12 @@ class FileProcessor:
         try:
             # Converter para base64
             base64_data = base64.b64encode(file_content).decode("utf-8")
-
             result = {
+                "type": "media",
                 "filename": filename,
                 "mime_type": mime_type,
-                "data": base64_data,
                 "size": len(file_content),
+                "data": base64_data,
             }
 
             # Salvar no storage se solicitado
@@ -320,7 +348,7 @@ class FileProcessor:
             logger.info(
                 f"[FileProcessor] Arquivo processado: {filename} "
                 f"({mime_type}, {len(file_content)} bytes)"
-                + (f", hash: {result.get('file_hash')}" if save_to_storage else "")
+                + (f", ID: {result.get('file_hash')}" if save_to_storage else "")
             )
 
             return result
@@ -348,18 +376,9 @@ class FileProcessor:
         if message and message.strip():
             content.append({"type": "text", "text": message})
 
-        # Adicionar arquivos no formato inline_data (Gemini native format)
+        # Adicionar arquivos no formato especificado (ordem exata dos campos)
         for file_info in files:
-            content.append(
-                {
-                    "type": "media",
-                    "mime_type": file_info["mime_type"],
-                    "data": file_info["data"],
-                    "filename": file_info[
-                        "filename"
-                    ],  # Preservar filename para download
-                }
-            )
+            content.append(file_info)
 
         logger.info(
             f"[FileProcessor] Criado conteúdo multimodal: "

@@ -860,7 +860,7 @@ export default function ChatClient() {
     if (Array.isArray(content)) {
       // Separar texto de arquivos/imagens
       const textItems = content.filter(item => item.type === "text");
-      const mediaItems = content.filter(item => item.type === "media" || item.type === "image_url");
+      const mediaItems = content.filter(item => item.type === "media" || item.type === "image_url" || item.type === "file" || item.type === "image");
 
       return (
         <div className="p-6">
@@ -921,10 +921,11 @@ export default function ChatClient() {
             }`}>
               {mediaItems.map((item: any, index: number) => {
             // Media content (images, PDFs, etc)
-            if (item.type === "media" && item.mime_type && item.data) {
+            const base64Data = item.base64 || item.data; // Accept both base64 and data
+            if ((item.type === "media" || item.type === "image" || item.type === "file") && item.mime_type && base64Data) {
               const mimeType = item.mime_type;
               const isImage = mimeType.startsWith("image/");
-              const imageUrl = `data:${mimeType};base64,${item.data}`;
+              const imageUrl = `data:${mimeType};base64,${base64Data}`;
               const filename = item.filename || "file";
 
               if (isImage) {
@@ -1398,6 +1399,11 @@ export default function ChatClient() {
                                                   "reasoning_message")
                                           );
 
+                                        // Define isDarkMode for reasoning code blocks
+                                        const isDarkMode = typeof window !== 'undefined'
+                                          ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                                          : false;
+
                                         return (
                                           <div className="space-y-2">
                                             {interactionSteps.length > 0 ? (
@@ -1427,9 +1433,22 @@ export default function ChatClient() {
                                                     </div>
 
                                                     {step.reasoning && (
-                                                      <p className="italic text-muted-foreground text-sm">
-                                                        {step.reasoning}
-                                                      </p>
+                                                      <div className="italic text-muted-foreground text-sm">
+                                                        {hasCodeBlocks(step.reasoning) ? (
+                                                          <div className="space-y-2">
+                                                            {parseMarkdownWithCode(step.reasoning, isDarkMode, false)}
+                                                          </div>
+                                                        ) : (
+                                                          <div
+                                                            className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words"
+                                                            dangerouslySetInnerHTML={{
+                                                              __html: DOMPurify.sanitize(
+                                                                marked.parse(step.reasoning, { breaks: true }) as string
+                                                              )
+                                                            }}
+                                                          />
+                                                        )}
+                                                      </div>
                                                     )}
 
                                                     {step.tool_call && (
@@ -1779,12 +1798,18 @@ export default function ChatClient() {
                                                   </div>
                                                 </AccordionTrigger>
                                                 <AccordionContent className="p-4 space-y-4">
-                                                  {msg.fullResponse.messages
-                                                    .filter(
-                                                      (m) =>
-                                                        m.message_type !== "assistant_message"
-                                                    )
-                                                    .map((step, stepIndex) => (
+                                                  {(() => {
+                                                    // Define isDarkMode for reasoning code blocks
+                                                    const isDarkMode = typeof window !== 'undefined'
+                                                      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                                                      : false;
+
+                                                    return msg.fullResponse.messages
+                                                      .filter(
+                                                        (m) =>
+                                                          m.message_type !== "assistant_message"
+                                                      )
+                                                      .map((step, stepIndex) => (
                                                       <div
                                                         key={`${step.id}-${step.message_type}-${stepIndex}`}
                                                         className="space-y-2"
@@ -1801,9 +1826,22 @@ export default function ChatClient() {
                                                           )}
                                                         </div>
                                                         {step.reasoning && (
-                                                          <p className="italic text-muted-foreground text-base pl-6">
-                                                            {step.reasoning}
-                                                          </p>
+                                                          <div className="italic text-muted-foreground text-base pl-6">
+                                                            {hasCodeBlocks(step.reasoning) ? (
+                                                              <div className="space-y-2">
+                                                                {parseMarkdownWithCode(step.reasoning, isDarkMode, false)}
+                                                              </div>
+                                                            ) : (
+                                                              <div
+                                                                className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words"
+                                                                dangerouslySetInnerHTML={{
+                                                                  __html: DOMPurify.sanitize(
+                                                                    marked.parse(step.reasoning, { breaks: true }) as string
+                                                                  )
+                                                                }}
+                                                              />
+                                                            )}
+                                                          </div>
                                                         )}
                                                         {step.tool_call && (
                                                           <div>
@@ -1835,7 +1873,8 @@ export default function ChatClient() {
                                                           />
                                                         )}
                                                       </div>
-                                                    ))}
+                                                    ));
+                                                  })()}
                                                   {msg.fullResponse.usage && (
                                                     <div className="space-y-2 pt-2 border-t">
                                                       <div className="flex items-center gap-2">

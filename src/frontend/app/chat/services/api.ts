@@ -228,7 +228,7 @@ export async function sendChatMessage(
   files?: File[]
 ): Promise<ChatResponseData> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+  const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout")), 300000); // 5 minutos
 
   try {
     // Sempre usar FormData (unificado)
@@ -324,7 +324,7 @@ export async function sendChatMessageStream(
   onError?: (error: Error) => void
 ): Promise<void> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+  const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout")), 300000); // 5 minutos
 
   try {
     // Sempre usar FormData (unificado)
@@ -457,7 +457,7 @@ export async function getUserHistory(
 ): Promise<HistoryResponseData> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+    const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout")), 30000); // 30 segundos
 
     const url = new URL(`${API_BASE_URL}/api/v1/chat/history/${userId}`);
     if (limit) {
@@ -508,7 +508,7 @@ export async function getUserHistory(
 export async function deleteUserHistory(userId: string, token: string): Promise<DeleteHistoryResponseData> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+    const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout")), 30000); // 30 segundos
 
     const res = await fetch(`${API_BASE_URL}/api/v1/chat/history/${userId}`, {
       method: 'DELETE',

@@ -422,7 +422,12 @@ class Agent:
         "Adiciona timestamp nas mensagens do usuario antes do invoke"
         msg_datetime = datetime.now(timezone.utc).isoformat()
         for message in kwargs["input"]["messages"]:
-            message["additional_kwargs"] = {"timestamp": msg_datetime}
+            if "additional_kwargs" in message and isinstance(
+                message["additional_kwargs"], dict
+            ):
+                message["additional_kwargs"]["timestamp"] = msg_datetime
+            else:
+                message["additional_kwargs"] = {"timestamp": msg_datetime}
         return kwargs
 
     def _sanitize_input_messages(self, **kwargs):

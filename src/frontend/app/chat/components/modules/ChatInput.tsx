@@ -71,9 +71,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     Array.from(files).forEach((file) => {
       const fileType = getFileType(file);
 
-      // Verificar tamanho (max 20MB)
-      if (file.size > 20 * 1024 * 1024) {
-        toast.error(`Arquivo ${file.name} muito grande (max 20MB)`);
+      // Verificar tamanho (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`Arquivo ${file.name} muito grande (max 50MB)`);
         return;
       }
 
@@ -148,9 +148,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     Array.from(files).forEach((file) => {
       const fileType = getFileType(file);
 
-      // Verificar tamanho (max 20MB)
-      if (file.size > 20 * 1024 * 1024) {
-        toast.error(`Arquivo ${file.name} muito grande (max 20MB)`);
+      // Verificar tamanho (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`Arquivo ${file.name} muito grande (max 50MB)`);
         return;
       }
 

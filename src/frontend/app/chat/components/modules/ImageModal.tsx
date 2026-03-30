@@ -64,11 +64,15 @@ export default function ImageModal({
           </div>
         </DialogHeader>
         <div className="flex items-center justify-center p-4 pt-0">
-          <img
-            src={imageUrl}
-            alt={filename}
-            className="max-w-full max-h-[80vh] object-contain rounded-lg"
-          />
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={filename}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+            />
+          ) : (
+            <div className="text-muted-foreground">Imagem não disponível</div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

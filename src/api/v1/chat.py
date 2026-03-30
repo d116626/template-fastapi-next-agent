@@ -2,16 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Union
-from datetime import datetime
-from langchain_core.load.dump import dumpd
-from langchain_core.load.load import load
 import json
 
 from src.core.security.dependencies import validar_token
 from src.llm.agent_old import Agent
 from src.utils.log import logger
 from src.llm.tools import TOOLS
-from src.llm.parser import to_gateway_format
+from src.utils.parser import to_gateway_format
 from src.llm.history import (
     get_thread_history,
     delete_thread_history,
@@ -149,7 +146,7 @@ def get_or_create_agent(
 
 async def _process_uploaded_files(
     files: List[UploadFile],
-) -> tuple[List[Dict], List[Dict]]:
+) -> List[Dict]:
     """
     Process uploaded files and return processed files and metadata.
 
@@ -157,8 +154,6 @@ async def _process_uploaded_files(
         Tuple of (processed_files, files_metadata)
     """
     processed_files = []
-    files_metadata = []
-
     for file in files:
         try:
             # Read file content
@@ -167,32 +162,24 @@ async def _process_uploaded_files(
             # Get MIME type
             mime_type = file.content_type or "application/octet-stream"
 
-            # Process file
+            # Process file and save to storage
             file_info = FileProcessor.process_file(
-                file_content, file.filename, mime_type
+                file_content,
+                file.filename,
+                mime_type,
+                save_to_storage=True,  # Save for VTX extraction
             )
             processed_files.append(file_info)
-
             logger.info(
                 f"[Chat API] Processed file: {file.filename} "
                 f"(Type: {get_file_type_from_mime(file_info['mime_type'])}, "
                 f"MIME: {file_info['mime_type']}, Size: {file_info['size']} bytes)"
             )
 
-            # Collect metadata
-            files_metadata.append(
-                {
-                    "filename": file_info["filename"],
-                    "type": get_file_type_from_mime(file_info.get("mime_type", "")),
-                    "mime_type": file_info.get("mime_type"),
-                    "size": file_info.get("size"),
-                }
-            )
-
         except ValueError as e:
             logger.warning(
                 f"[Chat API] Skipping unsupported file: {file.filename} "
-                f"(MIME: {mime_type}) - {str(e)}"
+                f"(MIME: {file_info['mime_type']}) - {str(e)}"
             )
             continue
         except Exception as e:
@@ -205,7 +192,7 @@ async def _process_uploaded_files(
                 detail=f"Error processing file {file.filename}: {str(e)}",
             )
 
-    return processed_files, files_metadata
+    return processed_files
 
 
 def _prepare_message_content(
@@ -220,9 +207,11 @@ def _prepare_message_content(
         Either plain text or multimodal content list
     """
     if processed_files:
+        # Create multimodal content (message stays original)
         content = FileProcessor.create_langchain_content(message, processed_files)
         logger.info(
-            f"[Chat API] Created multimodal content with {len(content)} elements"
+            f"[Chat API] Created multimodal content with {len(content)} elements, "
+            f"file IDs: {[f.get('file_hash') for f in processed_files]}"
         )
         return content
     elif files and len(files) > 0:
@@ -271,7 +260,7 @@ async def list_models():
 
 @router.post("/message", response_model=ChatResponse)
 async def send_message(
-    message: str = Form(...),
+    message: str = Form(""),
     user_id: str = Form(...),
     system_prompt: str = Form("You are a helpful assistant."),
     model: str = Form("gemini-2.5-flash"),
@@ -333,21 +322,14 @@ async def send_message(
 
         # Process files if provided
         processed_files = []
-        files_metadata = []
-
         if files and len(files) > 0:
-            processed_files, files_metadata = await _process_uploaded_files(files)
+            processed_files = await _process_uploaded_files(files)
 
         # Prepare message content
         content = _prepare_message_content(request.message, files, processed_files)
 
         # Prepare data
         data = {"messages": [{"role": "user", "content": content}]}
-
-        # Add file metadata to additional_kwargs if files were attached
-        if files_metadata:
-            data["messages"][0]["additional_kwargs"] = {"files": files_metadata}
-
         config = {"configurable": {"thread_id": request.user_id}}
 
         # Query agent
@@ -382,7 +364,7 @@ async def send_message(
 
 @router.post("/message/stream")
 async def send_message_stream(
-    message: str = Form(...),
+    message: str = Form(""),
     user_id: str = Form(...),
     system_prompt: str = Form("You are a helpful assistant."),
     model: str = Form("gemini-2.5-flash"),
@@ -449,20 +431,17 @@ async def send_message_stream(
 
         # Process files if provided
         processed_files = []
-        files_metadata = []
-
         if files and len(files) > 0:
-            processed_files, files_metadata = await _process_uploaded_files(files)
+            processed_files = await _process_uploaded_files(files)
 
         # Prepare message content
         content = _prepare_message_content(request.message, files, processed_files)
 
         # Prepare data
         data = {"messages": [{"role": "user", "content": content}]}
-
         # Add file metadata to additional_kwargs if files were attached
-        if files_metadata:
-            data["messages"][0]["additional_kwargs"] = {"files": files_metadata}
+
+        # logger.info(json.dumps(data, ensure_ascii=False, indent=2))
 
         config = {"configurable": {"thread_id": request.user_id}}
 
