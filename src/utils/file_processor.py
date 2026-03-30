@@ -4,9 +4,129 @@ Converte arquivos para base64 para envio ao Gemini (processamento nativo).
 """
 
 import base64
-from typing import Dict, Any, List
+import hashlib
+import sqlite3
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 from src.utils.log import logger
+
+# Database path for file storage
+DB_PATH = Path(__file__).parent.parent / "db" / "data" / "file_storage.db"
+
+
+class FileStorage:
+    """Storage de arquivos processados (base64 em SQLite)."""
+
+    @staticmethod
+    def init_db():
+        """Inicializa database de arquivos."""
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS files (
+                file_hash TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                content_base64 TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+        logger.debug("[FileStorage] Database initialized")
+
+    @staticmethod
+    def save_file(content: bytes, filename: str, mime_type: str) -> str:
+        """
+        Salva arquivo e retorna hash curto (8 chars).
+
+        Args:
+            content: Bytes do arquivo
+            filename: Nome original
+            mime_type: MIME type
+
+        Returns:
+            file_hash: 8 caracteres (SHA256[:8])
+        """
+        # Generate hash
+        full_hash = hashlib.sha256(content).hexdigest()
+        file_hash = full_hash[:8]
+
+        # Base64
+        content_b64 = base64.b64encode(content).decode("utf-8")
+
+        # Save
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO files
+            (file_hash, filename, mime_type, size, content_base64)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (file_hash, filename, mime_type, len(content), content_b64),
+        )
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"[FileStorage] Saved file: {filename} (hash: {file_hash})")
+
+        return file_hash
+
+    @staticmethod
+    def get_file(file_hash: str) -> Optional[Dict[str, Any]]:
+        """
+        Recupera arquivo pelo hash.
+
+        Returns:
+            {
+                "file_hash": "a7f3c2e1",
+                "filename": "nota.pdf",
+                "mime_type": "application/pdf",
+                "content": bytes
+            }
+        """
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT file_hash, filename, mime_type, content_base64
+            FROM files
+            WHERE file_hash = ?
+        """,
+            (file_hash,),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        # Decode base64
+        content = base64.b64decode(row["content_base64"])
+
+        return {
+            "file_hash": row["file_hash"],
+            "filename": row["filename"],
+            "mime_type": row["mime_type"],
+            "content": content,
+        }
+
+
+# Initialize database on import
+FileStorage.init_db()
 
 
 class FileProcessor:
@@ -144,7 +264,11 @@ class FileProcessor:
 
     @classmethod
     def process_file(
-        cls, file_content: bytes, filename: str, mime_type: str
+        cls,
+        file_content: bytes,
+        filename: str,
+        mime_type: str,
+        save_to_storage: bool = True,
     ) -> Dict[str, Any]:
         """
         Processa um arquivo convertendo para base64.
@@ -153,9 +277,11 @@ class FileProcessor:
             file_content: Bytes do arquivo
             filename: Nome do arquivo
             mime_type: Tipo MIME do arquivo
+            save_to_storage: Se True, salva no FileStorage e retorna file_hash
 
         Returns:
             Dict com informações do arquivo processado
+            Se save_to_storage=True, inclui "file_hash" (8 chars)
         """
         # Tentar corrigir MIME type baseado na extensão se necessário
         detected_mime = cls.get_mime_from_filename(filename)
@@ -179,17 +305,25 @@ class FileProcessor:
             # Converter para base64
             base64_data = base64.b64encode(file_content).decode("utf-8")
 
-            logger.info(
-                f"[FileProcessor] Arquivo processado: {filename} "
-                f"({mime_type}, {len(file_content)} bytes)"
-            )
-
-            return {
+            result = {
                 "filename": filename,
                 "mime_type": mime_type,
                 "data": base64_data,
                 "size": len(file_content),
             }
+
+            # Salvar no storage se solicitado
+            if save_to_storage:
+                file_hash = FileStorage.save_file(file_content, filename, mime_type)
+                result["file_hash"] = file_hash
+
+            logger.info(
+                f"[FileProcessor] Arquivo processado: {filename} "
+                f"({mime_type}, {len(file_content)} bytes)"
+                + (f", hash: {result.get('file_hash')}" if save_to_storage else "")
+            )
+
+            return result
         except Exception as e:
             logger.error(f"[FileProcessor] Erro ao processar arquivo {filename}: {e}")
             raise
@@ -221,7 +355,9 @@ class FileProcessor:
                     "type": "media",
                     "mime_type": file_info["mime_type"],
                     "data": file_info["data"],
-                    "filename": file_info["filename"],  # Preservar filename para download
+                    "filename": file_info[
+                        "filename"
+                    ],  # Preservar filename para download
                 }
             )
 
