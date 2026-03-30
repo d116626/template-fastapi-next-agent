@@ -2,23 +2,48 @@ import React from 'react';
 import { Search, Lightbulb } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import remarkGfm from 'remark-gfm';
 import JsonViewer from './JsonViewer';
 import { InstrucaoItem } from '../../types/chat';
-
-// Configurar marked para processar quebras de linha
-marked.use({ breaks: true });
 
 interface ToolReturnViewerProps {
   toolReturn: unknown;
   toolName?: string;
 }
 
+// Helper component for rendering markdown
+const MarkdownContent = ({ children }: { children: string }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      h1: ({node, ...props}) => <h1 className="text-base font-bold mb-1 mt-2" {...props} />,
+      h2: ({node, ...props}) => <h2 className="text-sm font-bold mb-1 mt-1.5" {...props} />,
+      p: ({node, ...props}) => <p className="mb-1 leading-relaxed" {...props} />,
+      ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-1 space-y-0.5" {...props} />,
+      ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-1 space-y-0.5" {...props} />,
+      code: ({node, inline, className, children, ...props}: any) => {
+        const match = /language-(\w+)/.exec(className || '');
+        return !inline && match ? (
+          <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" className="rounded-md my-1 text-xs" {...props}>
+            {String(children).replace(/\n$/, '')}
+          </SyntaxHighlighter>
+        ) : (
+          <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>
+        );
+      },
+    }}
+  >
+    {children}
+  </ReactMarkdown>
+);
+
 const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
   try {
     const data = typeof toolReturn === 'string' ? JSON.parse(toolReturn) : toolReturn;
-    
+
     if (typeof data !== 'object' || data === null) {
       return <p className="p-2 bg-muted/50 rounded-md text-base-custom whitespace-pre-wrap break-all font-mono">{String(data)}</p>;
     }
@@ -99,10 +124,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       {result.descricao_completa && (
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Descrição Completa</h5>
-                          <div
-                            className="prose prose-lg dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.descricao_completa, { breaks: true }) as string) }}
-                          />
+                          <MarkdownContent>{result.descricao_completa}</MarkdownContent>
                         </div>
                       )}
 
@@ -168,10 +190,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       {result.instrucoes_solicitante && (
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Instruções ao Solicitante</h5>
-                          <div
-                            className="prose prose-lg dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.instrucoes_solicitante, { breaks: true }) as string) }}
-                          />
+                          <MarkdownContent>{result.instrucoes_solicitante}</MarkdownContent>
                         </div>
                       )}
 
@@ -179,10 +198,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       {result.resultado_solicitacao && (
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">Resultado da Solicitação</h5>
-                          <div
-                            className="prose prose-lg dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.resultado_solicitacao, { breaks: true }) as string) }}
-                          />
+                          <MarkdownContent>{result.resultado_solicitacao}</MarkdownContent>
                         </div>
                       )}
 
@@ -190,10 +206,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       {result.servico_nao_cobre && (
                         <div>
                           <h5 className="font-medium text-sm text-muted-foreground mb-1">O que o serviço NÃO cobre</h5>
-                          <div
-                            className="prose prose-lg dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(result.servico_nao_cobre, { breaks: true }) as string) }}
-                          />
+                          <MarkdownContent>{result.servico_nao_cobre}</MarkdownContent>
                         </div>
                       )}
 
@@ -284,10 +297,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                         </AccordionTrigger>
                         <AccordionContent>
                           {typeof value === 'string' ? (
-                            <div
-                              className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
-                              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(value, { breaks: true }) as string) }}
-                            />
+                            <MarkdownContent>{value}</MarkdownContent>
                           ) : (
                             <pre className="text-base-custom font-mono whitespace-pre-wrap break-all text-foreground overflow-auto">
                               {JSON.stringify(value, null, 2)}
@@ -297,10 +307,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       </AccordionItem>
                     </Accordion>
                   ) : typeof value === 'string' ? (
-                    <div
-                      className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(value, { breaks: true }) as string) }}
-                    />
+                    <MarkdownContent>{value}</MarkdownContent>
                   ) : (
                     <pre className="text-base-custom font-mono whitespace-pre-wrap break-all text-foreground overflow-auto">
                       {JSON.stringify(value, null, 2)}
@@ -324,21 +331,18 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
         }>;
         categorias?: unknown;
       };
-      
+
       return (
         <div className="space-y-4">
           {(toolReturnData.next_tool_instructions || toolReturnData.next_too_instructions) && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Próximas Instruções</h5>
               <div className="pl-4">
-                <div
-                  className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(toolReturnData.next_tool_instructions || toolReturnData.next_too_instructions || '', { breaks: true }) as string) }}
-                />
+                <MarkdownContent>{toolReturnData.next_tool_instructions || toolReturnData.next_too_instructions || ''}</MarkdownContent>
               </div>
             </div>
           )}
-          
+
           {toolReturnData.tema && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Tema</h5>
@@ -349,7 +353,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
               </div>
             </div>
           )}
-          
+
           {toolReturnData.instrucoes && Array.isArray(toolReturnData.instrucoes) && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Instruções</h5>
@@ -364,17 +368,14 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                     )}
                     {/* Renderiza instruções se existir */}
                     {item.instrucoes && typeof item.instrucoes === 'string' && (
-                      <div
-                        className="prose prose-lg dark:prose-invert max-w-none whitespace-pre-wrap prose-base-custom"
-                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(item.instrucoes, { breaks: true }) as string) }}
-                      />
+                      <MarkdownContent>{item.instrucoes}</MarkdownContent>
                     )}
                   </div>
                 ))}
               </div>
             </div>
           )}
-          
+
           {Boolean(toolReturnData.categorias) && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Categorias</h5>
@@ -403,7 +404,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
           total_tokens?: number;
         };
       };
-      
+
       return (
         <div className="space-y-4">
           {toolReturnData.message && (
@@ -416,7 +417,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
               </div>
             </div>
           )}
-          
+
           {toolReturnData.documents && Array.isArray(toolReturnData.documents) && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Documentos Encontrados ({toolReturnData.documents.length})</h5>
@@ -437,9 +438,9 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
                       {doc.content}
                     </div>
                     {doc.url && (
-                      <a 
-                        href={doc.url} 
-                        target="_blank" 
+                      <a
+                        href={doc.url}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-primary hover:underline inline-flex items-center gap-1"
                       >
@@ -454,7 +455,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
               </div>
             </div>
           )}
-          
+
           {toolReturnData.metadata?.total_tokens && (
             <div className="space-y-1">
               <h5 className="font-medium text-base-custom capitalize text-muted-foreground">Metadata</h5>
@@ -478,10 +479,7 @@ const ToolReturnViewer = ({ toolReturn, toolName }: ToolReturnViewerProps) => {
             <div key={key}>
               <p className="font-semibold text-base-custom capitalize">{key.replace(/_/g, ' ')}:</p>
               {key.toLowerCase().includes('text') || key.toLowerCase().includes('markdown') ? (
-                <div 
-                  className="prose prose-lg dark:prose-invert max-w-full prose-base-custom"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(String(value)) as string) }}
-                />
+                <MarkdownContent>{String(value)}</MarkdownContent>
               ) : (
                 <JsonViewer data={value as object} />
               )}

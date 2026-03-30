@@ -39,6 +39,7 @@ class Agent:
         temperature: float = 0.7,
         include_thoughts: bool = True,
         thinking_budget: int = -1,
+        enable_streaming: bool = True,
         db_path: str | None = None,
     ):
         self._model = model
@@ -47,6 +48,7 @@ class Agent:
         self._temperature = temperature
         self._include_thoughts = include_thoughts
         self._thinking_budget = thinking_budget
+        self._enable_streaming = enable_streaming
         self._setup_complete_async = False
         self.db_path = db_path or DB_PATH
 
@@ -61,7 +63,7 @@ class Agent:
             temperature=self._temperature,
             include_thoughts=self._include_thoughts,
             thinking_budget=self._thinking_budget,
-            streaming=True,  # Enable token-by-token streaming
+            streaming=self._enable_streaming,  # Configurable streaming
         )
 
         # Wrap tools with logging

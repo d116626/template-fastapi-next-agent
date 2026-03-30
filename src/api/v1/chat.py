@@ -104,6 +104,7 @@ def get_or_create_agent(
     temperature: float = 0.7,
     include_thoughts: bool = True,
     thinking_budget: int = -1,
+    enable_streaming: bool = True,
 ) -> Agent:
     """Get existing agent or create new one for user."""
     # Check if agent exists with different config - recreate if needed
@@ -115,6 +116,7 @@ def get_or_create_agent(
             or old_agent._temperature != temperature
             or old_agent._include_thoughts != include_thoughts
             or old_agent._thinking_budget != thinking_budget
+            or old_agent._enable_streaming != enable_streaming
         ):
             logger.info(
                 f"[Chat API] Agent config changed for user {user_id}, recreating..."
@@ -140,6 +142,7 @@ def get_or_create_agent(
             temperature=temperature,
             include_thoughts=include_thoughts,
             thinking_budget=thinking_budget,
+            enable_streaming=enable_streaming,
         )
     return agents[user_id]
 
@@ -207,8 +210,21 @@ def _prepare_message_content(
         Either plain text or multimodal content list
     """
     if processed_files:
-        # Create multimodal content (message stays original)
-        content = FileProcessor.create_langchain_content(message, processed_files)
+        # Create file context for VTX tool
+        file_context = "==LOADED FILES==\n"
+        for index, file_info in enumerate(processed_files):
+            file_hash = file_info.get("file_hash", "unknown")
+            filename = file_info.get("filename", "unknown")
+            file_context += f"{index + 1}. {file_hash}: {filename}\n"
+
+        # Add context to message
+        message_with_context = f"{message}\n\n{file_context}"
+
+        # Create multimodal content
+        content = FileProcessor.create_langchain_content(
+            message_with_context, processed_files
+        )
+
         logger.info(
             f"[Chat API] Created multimodal content with {len(content)} elements, "
             f"file IDs: {[f.get('file_hash') for f in processed_files]}"
@@ -318,6 +334,7 @@ async def send_message(
             temperature=request.temperature,
             include_thoughts=include_thoughts,
             thinking_budget=thinking_budget,
+            enable_streaming=False,  # Disable streaming for non-stream endpoint
         )
 
         # Process files if provided
@@ -427,6 +444,7 @@ async def send_message_stream(
             temperature=request.temperature,
             include_thoughts=include_thoughts,
             thinking_budget=thinking_budget,
+            enable_streaming=True,  # Enable streaming for stream endpoint
         )
 
         # Process files if provided

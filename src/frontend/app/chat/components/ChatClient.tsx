@@ -23,9 +23,8 @@ import {
   deleteSystemPrompt,
   SystemPrompt,
 } from "../services/api";
-import { marked } from "marked";
 import { toast } from "sonner";
-import { parseMarkdownWithCode, hasCodeBlocks } from "../utils/markdown";
+import { Markdown } from "../utils/markdown";
 
 import { DisplayMessage, MultimodalContent, MultimodalContentItem } from "../types/chat";
 
@@ -62,12 +61,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import DOMPurify from "dompurify";
-
-
-// Configurar marked para processar quebras de linha
-marked.use({ breaks: true });
-
 // --- Utils ---
 
 const getStepIcon = (
@@ -855,7 +848,7 @@ export default function ChatClient() {
   };
 
   // Helper to render message content (handles both text and multimodal content)
-  const renderMessageContent = (content: any, isUser: boolean) => {
+  const renderMessageContent = (content: any) => {
     // Handle multimodal content (array format)
     if (Array.isArray(content)) {
       // Separar texto de arquivos/imagens
@@ -866,59 +859,16 @@ export default function ChatClient() {
         <div className="p-6">
           {/* Texto primeiro */}
           {textItems.length > 0 && (
-            <div className="space-y-2">
-              {textItems.map((item: any, index: number) => {
-                const text = item.text;
-                const isDarkMode = typeof window !== 'undefined'
-                  ? document.documentElement.classList.contains('dark')
-                  : false;
-
-                // Check if text contains code blocks
-                if (hasCodeBlocks(text)) {
-                  const elements = parseMarkdownWithCode(text, isDarkMode, isUser);
-                  return (
-                    <div key={`text-${index}`}>
-                      {elements}
-                    </div>
-                  );
-                }
-
-                // Fallback to regular markdown parsing
-                const parsed = marked.parse(text, { breaks: true }) as string;
-                const styledHTML = parsed.replace(
-                  /<pre><code class="language-json">/g,
-                  `<pre style="background-color: transparent; padding: 1rem; border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"><code class="language-json" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">`
-                );
-
-                const baseStyles: React.CSSProperties = isUser
-                  ? {}
-                  : {
-                      "--tw-prose-pre-bg": "rgb(31 41 55)",
-                      "--tw-prose-pre-code": "rgb(209 213 219)",
-                    } as React.CSSProperties;
-
-                return (
-                  <div key={`text-${index}`}>
-                    <div
-                      className={`prose prose-sm dark:prose-invert max-w-none break-words ${
-                        isUser ? "text-primary-foreground user-message-content" : ""
-                      }`}
-                      style={baseStyles}
-                      dangerouslySetInnerHTML={{
-                        __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
-                      }}
-                    />
-                  </div>
-                );
-              })}
+            <div className="space-y-1">
+              {textItems.map((item: any, index: number) => (
+                <Markdown key={`text-${index}`}>{item.text}</Markdown>
+              ))}
             </div>
           )}
 
           {/* Anexos depois */}
           {mediaItems.length > 0 && (
-            <div className={`flex flex-wrap gap-2 ${textItems.length > 0 ? "mt-3 pt-3 border-t" : ""} ${
-              isUser ? "border-white/10" : "border-border/30"
-            }`}>
+            <div className={`flex flex-wrap gap-2 ${textItems.length > 0 ? "mt-3 pt-3 border-t border-border/30" : ""}`}>
               {mediaItems.map((item: any, index: number) => {
             // Media content (images, PDFs, etc)
             const base64Data = item.base64 || item.data; // Accept both base64 and data
@@ -933,11 +883,7 @@ export default function ChatClient() {
                 return (
                   <div key={index} className="inline-block mr-2 mb-2">
                     <div
-                      className={`relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all ${
-                        isUser
-                          ? "border-white/20 hover:border-white/60"
-                          : "border-primary/20 hover:border-primary/60"
-                      }`}
+                      className="relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all border-primary/20 hover:border-primary/60"
                       onClick={() => openImageModal(imageUrl, filename)}
                     >
                       <img
@@ -957,11 +903,7 @@ export default function ChatClient() {
                       </div>
                     </div>
                     {filename && (
-                      <p
-                        className={`text-xs mt-1 truncate max-w-[100px] ${
-                          isUser ? "text-primary-foreground/80" : "text-muted-foreground"
-                        }`}
-                      >
+                      <p className="text-xs mt-1 truncate max-w-[100px] text-muted-foreground">
                         {filename}
                       </p>
                     )}
@@ -992,28 +934,14 @@ export default function ChatClient() {
                   <div
                     key={index}
                     onClick={handleDownload}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer transition-all group ${
-                      isUser
-                        ? "bg-white/10 hover:bg-white/20 border border-white/20 hover:border-white/40"
-                        : "bg-primary/5 hover:bg-primary/10 border border-primary/20 hover:border-primary/40"
-                    }`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer transition-all group bg-primary/5 hover:bg-primary/10 border border-primary/20 hover:border-primary/40"
                   >
                     <span className="text-lg">{getFileIcon()}</span>
                     <div className="flex flex-col min-w-0">
-                      <span
-                        className={`text-sm font-medium truncate max-w-[200px] ${
-                          isUser
-                            ? "text-primary-foreground group-hover:underline"
-                            : "text-foreground group-hover:underline"
-                        }`}
-                      >
+                      <span className="text-sm font-medium truncate max-w-[200px] text-foreground group-hover:underline">
                         {filename}
                       </span>
-                      <span
-                        className={`text-xs truncate ${
-                          isUser ? "text-primary-foreground/70" : "text-muted-foreground"
-                        }`}
-                      >
+                      <span className="text-xs truncate text-muted-foreground">
                         {mimeType.split("/")[1] || mimeType}
                       </span>
                     </div>
@@ -1030,11 +958,7 @@ export default function ChatClient() {
               return (
                 <div key={index} className="inline-block mr-2 mb-2">
                   <div
-                    className={`relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all ${
-                      isUser
-                        ? "border-white/20 hover:border-white/60"
-                        : "border-primary/20 hover:border-primary/60"
-                    }`}
+                    className="relative group cursor-pointer inline-block rounded-lg overflow-hidden border-2 transition-all border-primary/20 hover:border-primary/60"
                     onClick={() => openImageModal(imageUrl, filename)}
                   >
                     <img
@@ -1054,11 +978,7 @@ export default function ChatClient() {
                     </div>
                   </div>
                   {filename && (
-                    <p
-                      className={`text-xs mt-1 truncate max-w-[100px] ${
-                        isUser ? "text-primary-foreground/80" : "text-muted-foreground"
-                      }`}
-                    >
+                    <p className="text-xs mt-1 truncate max-w-[100px] text-muted-foreground">
                       {filename}
                     </p>
                   )}
@@ -1076,46 +996,10 @@ export default function ChatClient() {
 
     // Handle plain text content (string)
     const textContent = typeof content === "string" ? content : String(content || "");
-    const isDarkMode = typeof window !== 'undefined'
-      ? document.documentElement.classList.contains('dark')
-      : false;
-
-    // Check if text contains code blocks
-    if (hasCodeBlocks(textContent)) {
-      const elements = parseMarkdownWithCode(textContent, isDarkMode, isUser);
-      return (
-        <div className="p-6">
-          {elements}
-        </div>
-      );
-    }
-
-    // Fallback to regular markdown parsing
-    const parsed = marked.parse(textContent, { breaks: true }) as string;
-
-    const styledHTML = parsed.replace(
-      /<pre><code class="language-json">/g,
-      `<pre style="background-color: transparent; padding: 1rem; border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"><code class="language-json" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">`
-    );
-
-    const baseStyles: React.CSSProperties = isUser
-      ? {}
-      : {
-          "--tw-prose-pre-bg": "rgb(31 41 55)",
-          "--tw-prose-pre-code": "rgb(209 213 219)",
-        } as React.CSSProperties;
 
     return (
       <div className="p-6">
-        <div
-          className={`prose prose-sm dark:prose-invert max-w-none break-words ${
-            isUser ? "text-primary-foreground user-message-content" : ""
-          }`}
-          style={baseStyles}
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(styledHTML, { ADD_ATTR: ["style"] }),
-          }}
-        />
+        <Markdown>{textContent}</Markdown>
       </div>
     );
   };
@@ -1198,13 +1082,8 @@ export default function ChatClient() {
                             <Bot className="h-6 w-6 text-primary flex-shrink-0" />
                           )}
 
-                          <div
-                            className={`w-full max-w-[80%] rounded-lg overflow-hidden ${
-                              msg.message_type === "user_message"
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted"
-                            }`}
-                          >
+                          <div className="w-full max-w-[80%] rounded-lg overflow-hidden bg-muted text-foreground">
+
                             <div className="relative group">
                               <div className="flex items-center gap-2 px-3 py-1 bg-black/10 border-b border-border/20">
                                 <History className="h-3 w-3" />
@@ -1264,7 +1143,7 @@ export default function ChatClient() {
                                         1000;
 
                                       return (
-                                        <span className="text-xs text-primary-foreground/80 flex items-center gap-1 border-l border-primary-foreground/30 pl-2 ml-1">
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1 border-l border-muted-foreground/30 pl-2 ml-1">
                                           <Clock className="h-3 w-3" />
 
                                           {formatDuration(diff)}
@@ -1282,11 +1161,7 @@ export default function ChatClient() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className={`ml-auto h-6 w-6 ${
-                                        msg.message_type === "user_message"
-                                          ? "text-white/70 hover:text-white hover:bg-white/10"
-                                          : "text-foreground/50 hover:text-foreground hover:bg-muted"
-                                      }`}
+                                      className="ml-auto h-6 w-6 text-foreground/50 hover:text-foreground hover:bg-muted"
                                       onClick={() =>
                                         copyToClipboard(msg.content)
                                       }
@@ -1301,10 +1176,7 @@ export default function ChatClient() {
                                 </Tooltip>
                               </div>
 
-                              {renderMessageContent(
-                                msg.content || "",
-                                msg.message_type === "user_message"
-                              )}
+                              {renderMessageContent(msg.content || "")}
                             </div>
 
                             {msg.message_type === "assistant_message" && (
@@ -1434,20 +1306,7 @@ export default function ChatClient() {
 
                                                     {step.reasoning && (
                                                       <div className="italic text-muted-foreground text-sm">
-                                                        {hasCodeBlocks(step.reasoning) ? (
-                                                          <div className="space-y-2">
-                                                            {parseMarkdownWithCode(step.reasoning, isDarkMode, false)}
-                                                          </div>
-                                                        ) : (
-                                                          <div
-                                                            className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words"
-                                                            dangerouslySetInnerHTML={{
-                                                              __html: DOMPurify.sanitize(
-                                                                marked.parse(step.reasoning, { breaks: true }) as string
-                                                              )
-                                                            }}
-                                                          />
-                                                        )}
+                                                        <Markdown compact>{step.reasoning}</Markdown>
                                                       </div>
                                                     )}
 
@@ -1505,21 +1364,11 @@ export default function ChatClient() {
                                                             Intermediária:
                                                           </p>
 
-                                                          <div
-                                                            className="prose prose-lg dark:prose-invert max-w-none bg-muted/30 p-2 rounded"
-                                                            dangerouslySetInnerHTML={{
-                                                              __html:
-                                                                DOMPurify.sanitize(
-                                                                  marked.parse(
-                                                                    typeof step.content === 'string' ? step.content : extractTextFromContent(step.content),
-                                                                    {
-                                                                      breaks:
-                                                                        true,
-                                                                    }
-                                                                  ) as string
-                                                                ),
-                                                            }}
-                                                          />
+                                                          <div className="bg-muted/30 p-2 rounded">
+                                                            <Markdown>
+                                                              {typeof step.content === 'string' ? step.content : extractTextFromContent(step.content)}
+                                                            </Markdown>
+                                                          </div>
                                                         </div>
                                                       )}
                                                   </div>
@@ -1655,14 +1504,10 @@ export default function ChatClient() {
                   )}
                                                       {msg.isTimeoutError ? (
                                                         <div className="w-full max-w-[80%] p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 shadow-sm">
-                                                          {renderMessageContent(msg.content || "", false)}
+                                                          {renderMessageContent(msg.content || "")}
                                                         </div>
                                                       ) : (                                      <div
-                                        className={`w-full max-w-[80%] rounded-lg overflow-hidden ${
-                                          msg.sender === "user"
-                                            ? "bg-primary text-primary-foreground"
-                                            : "bg-muted"
-                                        }`}
+                                        className="w-full max-w-[80%] rounded-lg overflow-hidden bg-muted text-foreground"
                                       >
                                         <div className="relative group">
                                           <div className="flex items-center gap-2 px-3 py-1 bg-black/10 border-b border-border/20">
@@ -1701,7 +1546,7 @@ export default function ChatClient() {
                                                       new Date(prevMsg.timestamp).getTime()) /
                                                     1000;
                                                   return (
-                                                    <span className="text-xs text-primary-foreground/80 font-mono flex items-center gap-1 ml-2 border-l border-primary-foreground/30 pl-2">
+                                                    <span className="text-xs text-muted-foreground font-mono flex items-center gap-1 ml-2 border-l border-muted-foreground/30 pl-2">
                                                       <Clock className="h-3 w-3" />
                                                       {formatDuration(diff)}
                                                     </span>
@@ -1717,11 +1562,7 @@ export default function ChatClient() {
                                                 <Button
                                                   variant="ghost"
                                                   size="icon"
-                                                  className={`ml-auto h-6 w-6 ${
-                                                    msg.sender === "user"
-                                                      ? "text-white/70 hover:text-white hover:bg-white/10"
-                                                      : "text-foreground/50 hover:text-foreground hover:bg-muted"
-                                                  }`}
+                                                  className="ml-auto h-6 w-6 text-foreground/50 hover:text-foreground hover:bg-muted"
                                                   onClick={() => copyToClipboard(msg.content)}
                                                 >
                                                   <Copy className="h-3.5 w-3.5" />
@@ -1773,10 +1614,7 @@ export default function ChatClient() {
                                             </Accordion>
                                           )}
 
-                                          {renderMessageContent(
-                                            msg.content || "",
-                                            msg.sender === "user"
-                                          )}
+                                          {renderMessageContent(msg.content || "")}
                                         </div>
                                         {msg.sender === "bot" && msg.fullResponse && (
                                           <div className="mt-3 pt-3 border-t border-muted/30">
@@ -1827,20 +1665,7 @@ export default function ChatClient() {
                                                         </div>
                                                         {step.reasoning && (
                                                           <div className="italic text-muted-foreground text-base pl-6">
-                                                            {hasCodeBlocks(step.reasoning) ? (
-                                                              <div className="space-y-2">
-                                                                {parseMarkdownWithCode(step.reasoning, isDarkMode, false)}
-                                                              </div>
-                                                            ) : (
-                                                              <div
-                                                                className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words"
-                                                                dangerouslySetInnerHTML={{
-                                                                  __html: DOMPurify.sanitize(
-                                                                    marked.parse(step.reasoning, { breaks: true }) as string
-                                                                  )
-                                                                }}
-                                                              />
-                                                            )}
+                                                            <Markdown compact>{step.reasoning}</Markdown>
                                                           </div>
                                                         )}
                                                         {step.tool_call && (
