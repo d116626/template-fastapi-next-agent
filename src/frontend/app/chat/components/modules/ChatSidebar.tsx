@@ -365,7 +365,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
         {/* System Prompt Modal */}
         <Dialog open={showPromptModal} onOpenChange={setShowPromptModal}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>System Prompt</DialogTitle>
               <DialogDescription>
@@ -373,7 +373,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4">
+            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
               {/* Select para escolher prompt */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
