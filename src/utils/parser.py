@@ -45,10 +45,17 @@ class LangGraphMessageFormatter:
         """
         raw = dumpd(message)
 
-        # Adicionar usage_metadata se existir no response_metadata
-        response_metadata = getattr(message, "response_metadata", None)
-        if response_metadata and "usage_metadata" in response_metadata:
-            raw["usage_metadata"] = response_metadata["usage_metadata"]
+        # IMPORTANTE: usage_metadata vem como atributo direto do AIMessage (Gemini 2.5+)
+        # Não está dentro de response_metadata!
+        usage_metadata = getattr(message, "usage_metadata", None)
+        if usage_metadata:
+            # Colocar no top-level para facilitar acesso
+            raw["usage_metadata"] = usage_metadata
+
+            # Debug: log quando encontrar usage_metadata
+            from src.utils.log import logger
+
+            logger.debug(f"[Parser] Captured usage_metadata: {usage_metadata}")
 
         return raw
 
@@ -175,7 +182,10 @@ class LangGraphMessageFormatter:
         """
         msg_type = kwargs.get("type")
         response_metadata = kwargs.get("response_metadata", {})
-        usage_md = response_metadata.get("usage_metadata", {})
+
+        # IMPORTANTE: usage_metadata está no top-level (serialize_message move para lá)
+        # Formato Gemini: {input_tokens, output_tokens, total_tokens}
+        usage_md = kwargs.get("usage_metadata", {})
 
         if msg_type in ["human", "tool"]:
             # user_message e tool_return_message: campos null
@@ -187,19 +197,14 @@ class LangGraphMessageFormatter:
             }
         else:
             # assistant_message e tool_call_message: campos com dados
+            # Manter nomenclatura original do Gemini/LangGraph
             return {
                 "model_name": response_metadata.get("model_name", ""),
                 "finish_reason": response_metadata.get("finish_reason", ""),
                 "avg_logprobs": response_metadata.get("avg_logprobs"),
-                "usage_metadata": {
-                    "prompt_token_count": usage_md.get("prompt_token_count", 0),
-                    "candidates_token_count": usage_md.get("candidates_token_count", 0),
-                    "total_token_count": usage_md.get("total_token_count", 0),
-                    "thoughts_token_count": usage_md.get("thoughts_token_count", 0),
-                    "cached_content_token_count": usage_md.get(
-                        "cached_content_token_count", 0
-                    ),
-                },
+                "usage_metadata": (
+                    usage_md if usage_md else None
+                ),  # Passar objeto completo sem mapear
             }
 
     def create_base_message_dict(
@@ -261,10 +266,13 @@ class LangGraphMessageFormatter:
         tool_calls = kwargs.get("tool_calls", [])
 
         response_metadata = kwargs.get("response_metadata", {})
-        usage_md = response_metadata.get("usage_metadata", {})
-        output_details = usage_md.get("output_token_details") or {}
-        # reasoning_tokens agora pode vir do metadata OU ser calculado do conteúdo thinking
-        reasoning_tokens = output_details.get("reasoning", 0) or 0
+
+        # usage_metadata está no top-level agora
+        usage_md = kwargs.get("usage_metadata", {})
+
+        # Reasoning tokens vem de output_token_details.reasoning
+        output_token_details = usage_md.get("output_token_details", {})
+        reasoning_tokens = output_token_details.get("reasoning", 0) or 0
 
         final_content = ""
         thinking_content = ""
@@ -294,24 +302,24 @@ class LangGraphMessageFormatter:
                     "signature": None,
                 }
             )
-        elif reasoning_tokens > 0:
-            # Fallback para reasoning implícito (sem conteúdo textual exposto)
-            reasoning_text = "Processando..."
-            if tool_calls:
-                reasoning_text = f"Processando chamada para ferramenta {tool_calls[0].get('name', 'unknown')}"
-            elif final_content:
-                reasoning_text = "Processando resposta para o usuário"
+        # elif reasoning_tokens > 0:
+        #     # Fallback para reasoning implícito (sem conteúdo textual exposto)
+        #     reasoning_text = "Processando..."
+        #     if tool_calls:
+        #         reasoning_text = f"Processando chamada para ferramenta {tool_calls[0].get('name', 'unknown')}"
+        #     elif final_content:
+        #         reasoning_text = "Processando resposta para o usuário"
 
-            messages.append(
-                {
-                    **base_dict,
-                    "id": f"reasoning-{base_dict['id'] or uuid.uuid4()}",
-                    "message_type": "reasoning_message",
-                    "source": "reasoner_model",
-                    "reasoning": reasoning_text,
-                    "signature": None,
-                }
-            )
+        #     messages.append(
+        #         {
+        #             **base_dict,
+        #             "id": f"reasoning-{base_dict['id'] or uuid.uuid4()}",
+        #             "message_type": "reasoning_message",
+        #             "source": "reasoner_model",
+        #             "reasoning": reasoning_text,
+        #             "signature": None,
+        #         }
+        #     )
 
         if tool_calls:
             # Construir mapeamento de tool_call_id para nome da ferramenta
@@ -421,55 +429,59 @@ class LangGraphMessageFormatter:
             messages_to_process: Lista de mensagens processadas
 
         Returns:
-            Dict com estatísticas de uso
+            Dict com estatísticas de uso (nomenclatura Gemini/LangGraph)
         """
         input_tokens = 0
         output_tokens = 0
         total_tokens = 0
-        thoughts_tokens = 0
+        reasoning_tokens = 0
+        cache_read_tokens = 0
         model_names = set()
 
         for msg in messages_to_process:
             kwargs = msg.get("kwargs", {})
             response_metadata = kwargs.get("response_metadata", {})
-            usage_md = response_metadata.get("usage_metadata", {})
 
-            # Mapear campos corretos do Google AI
-            # input
-            input_tokens += int(usage_md.get("prompt_token_count", 0) or 0)
+            # usage_metadata está no top-level (serialize_message move para lá)
+            usage_md = msg.get("usage_metadata", {})
+            if not usage_md:
+                usage_md = kwargs.get("usage_metadata", {})
 
-            # output (candidates)
-            output_tokens += int(usage_md.get("candidates_token_count", 0) or 0)
+            if not usage_md:
+                continue
 
-            # thoughts (se houver)
-            thoughts_tokens += int(usage_md.get("thoughts_token_count", 0) or 0)
+            # Nomenclatura Gemini/LangGraph (mantém original)
+            input_tokens += int(usage_md.get("input_tokens", 0) or 0)
+            output_tokens += int(usage_md.get("output_tokens", 0) or 0)
+            total_tokens += int(usage_md.get("total_tokens", 0) or 0)
 
-            # total (geralmente a soma, mas usamos o valor retornado se existir)
-            msg_total = int(usage_md.get("total_token_count", 0) or 0)
-            if msg_total == 0:
-                msg_total = (
-                    int(usage_md.get("prompt_token_count", 0) or 0)
-                    + int(usage_md.get("candidates_token_count", 0) or 0)
-                    + int(usage_md.get("thoughts_token_count", 0) or 0)
-                )
-            total_tokens += msg_total
+            # Detalhes aninhados
+            input_token_details = usage_md.get("input_token_details", {})
+            output_token_details = usage_md.get("output_token_details", {})
+
+            reasoning_tokens += int(output_token_details.get("reasoning", 0) or 0)
+            cache_read_tokens += int(input_token_details.get("cache_read", 0) or 0)
 
             # Coletar model_names
             model_name = response_metadata.get("model_name")
             if model_name:
                 model_names.add(model_name)
 
-        # Se thoughts não estiverem incluídos em output_tokens (candidates),
-        # podemos querer expor isso ou somar.
-        # No Gemini, thoughts são cobrados como output, então faz sentido somar para ter uma noção de "tokens gerados".
-        total_output_tokens = output_tokens + thoughts_tokens
+        # Debug: log do cálculo
+        from src.utils.log import logger
+
+        logger.debug(
+            f"[Parser] Usage statistics: input={input_tokens}, output={output_tokens}, "
+            f"reasoning={reasoning_tokens}, cache={cache_read_tokens}, total={total_tokens}"
+        )
 
         return {
             "message_type": "usage_statistics",
-            "completion_tokens": total_output_tokens,  # Inclui pensamentos para refletir geração total
-            "thoughts_tokens": thoughts_tokens,  # Novo campo para expor o total de tokens de pensamento
-            "prompt_tokens": input_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "total_tokens": total_tokens,
+            "reasoning_tokens": reasoning_tokens,  # Tokens de pensamento/raciocínio
+            "cache_read_tokens": cache_read_tokens,  # Tokens lidos do cache
             "step_count": len(
                 {m.get("step_id") for m in self.processed_messages if m.get("step_id")}
             ),
@@ -567,7 +579,6 @@ class LangGraphMessageFormatter:
             "status": "completed",
             "data": {
                 "messages": self.processed_messages,
-                # "messages": messages_to_process,
             },
         }
 

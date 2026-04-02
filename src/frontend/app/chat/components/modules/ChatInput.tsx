@@ -2,9 +2,15 @@ import React, { useEffect, useState, useRef } from 'react';
 import { CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Send, Paperclip, FileText } from 'lucide-react';
+import { Loader2, Send, Paperclip, FileText, BarChart2, Lightbulb } from 'lucide-react';
 import FileUpload, { AttachedFile } from './FileUpload';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface ChatInputProps {
   input: string;
@@ -15,6 +21,13 @@ interface ChatInputProps {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   attachedFiles: AttachedFile[];
   onFilesChange: (files: AttachedFile[]) => void;
+  usageMetadata?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    reasoning_tokens?: number;
+    cache_read_tokens?: number;
+  } | null;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -25,7 +38,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
   textareaRef,
   attachedFiles,
-  onFilesChange
+  onFilesChange,
+  usageMetadata
 }) => {
   const [elapsed, setElapsed] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -181,7 +195,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <CardFooter
-      className="border-t pt-4 flex-col gap-2 relative"
+      className="border-t pt-4 flex-col gap-2"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -262,6 +276,54 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </Button>
         </div>
       </form>
+
+      {/* Token Usage Statistics - Embaixo da caixa */}
+      {usageMetadata && usageMetadata.total_tokens && usageMetadata.total_tokens > 0 && (
+        <div className="w-full flex items-center gap-1.5 text-[10px] text-muted-foreground pt-1">
+          <BarChart2 className="h-3 w-3" />
+
+          <Tooltip>
+            <TooltipTrigger>
+              <span className="font-mono">
+                {usageMetadata.total_tokens.toLocaleString()}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Total</TooltipContent>
+          </Tooltip>
+
+          <span className="opacity-50">|</span>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <span className="font-mono">
+                ↓{usageMetadata.input_tokens?.toLocaleString() || 0}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Input</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <span className="font-mono">
+                ↑{usageMetadata.output_tokens?.toLocaleString() || 0}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Output</TooltipContent>
+          </Tooltip>
+
+          <span className="opacity-50">|</span>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <span className="font-mono flex items-center gap-0.5">
+                <Lightbulb className="h-2.5 w-2.5" />
+                {usageMetadata.reasoning_tokens?.toLocaleString() || 0}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Reasoning</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
     </CardFooter>
   );
 };

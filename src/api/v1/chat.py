@@ -459,8 +459,6 @@ async def send_message_stream(
         data = {"messages": [{"role": "user", "content": content}]}
         # Add file metadata to additional_kwargs if files were attached
 
-        # logger.info(json.dumps(data, ensure_ascii=False, indent=2))
-
         config = {"configurable": {"thread_id": request.user_id}}
 
         # Stream generator

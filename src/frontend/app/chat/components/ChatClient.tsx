@@ -118,6 +118,108 @@ const formatDuration = (seconds: number) => {
   return `${m}m ${s}s`;
 };
 
+// --- Message Details Component ---
+const MessageDetails = ({
+  steps,
+  usageMetadata
+}: {
+  steps: (AgentMessage | HistoryMessage)[],
+  usageMetadata?: any
+}) => {
+  const extractTextFromContent = (content: MultimodalContent | null | undefined): string => {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    return content
+      .filter(item => item.type === 'text' && item.text)
+      .map(item => item.text || '')
+      .join('\n');
+  };
+
+  return (
+    <div className="space-y-4">
+      {steps.length > 0 ? (
+        steps.map((step, stepIndex) => (
+          <div
+            key={`step-${step.id}-${stepIndex}`}
+            className="space-y-2 border-l-2 border-muted pl-3"
+          >
+            <div className="flex items-center gap-2">
+              {getStepIcon(step.message_type)}
+              <h5 className="font-semibold text-sm">
+                {step.message_type.replace(/_/g, " ")}
+              </h5>
+              {step.name && (
+                <Badge variant="secondary">
+                  {step.name}
+                </Badge>
+              )}
+            </div>
+
+            {step.reasoning && (
+              <div className="italic text-muted-foreground text-sm">
+                <Markdown compact>{step.reasoning}</Markdown>
+              </div>
+            )}
+
+            {step.tool_call && (
+              <div>
+                <p className="font-semibold text-sm capitalize mb-2">
+                  Tool Call Arguments:
+                </p>
+                <JsonViewer
+                  data={(() => {
+                    try {
+                      return typeof step.tool_call.arguments === "string"
+                        ? JSON.parse(step.tool_call.arguments)
+                        : step.tool_call.arguments;
+                    } catch {
+                      return { raw: step.tool_call.arguments };
+                    }
+                  })()}
+                />
+              </div>
+            )}
+
+            {step.tool_return && (
+              <ToolReturnViewer
+                toolReturn={step.tool_return}
+                toolName={step.name || undefined}
+              />
+            )}
+
+            {step.content && step.message_type === "assistant_message" && (
+              <div>
+                <p className="font-semibold text-sm capitalize mb-2">
+                  Resposta Intermediária:
+                </p>
+                <div className="bg-muted/30 p-2 rounded">
+                  <Markdown>
+                    {typeof step.content === 'string' ? step.content : extractTextFromContent(step.content)}
+                  </Markdown>
+                </div>
+              </div>
+            )}
+          </div>
+        ))
+      ) : (
+        <div className="text-sm text-muted-foreground italic">
+          Resposta direta sem uso de ferramentas
+        </div>
+      )}
+
+      {usageMetadata && (
+        <div className="space-y-2 pt-2 border-t">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="h-4 w-4 text-purple-500" />
+            <h4 className="font-semibold">Usage Metadata</h4>
+          </div>
+          <JsonViewer data={usageMetadata} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Main Component ---
 
 export default function ChatClient() {
@@ -634,6 +736,7 @@ export default function ChatClient() {
           (formattedMessages) => {
             // Callback quando recebe as mensagens formatadas
             const latency = (Date.now() - startTime) / 1000;
+
             const assistantMessage = formattedMessages.find(
               (m) => m.message_type === "assistant_message"
             );
@@ -655,14 +758,15 @@ export default function ChatClient() {
                   // Preserve thinking data and expansion state
                   streamingThinking: currentMsg.streamingThinking,
                   thinkingExpanded: currentMsg.thinkingExpanded,
+                  // Usar usage_metadata diretamente do assistant_message
+                  usage_metadata: assistantMessage?.usage_metadata,
                 };
               }
               return updated;
             });
           },
           () => {
-            // Callback quando stream termina
-            console.log('Stream done');
+            // Callback quando stream termina (silent)
           },
           (error) => {
             // Callback de erro
@@ -678,6 +782,7 @@ export default function ChatClient() {
         );
 
         const latency = (Date.now() - startTime) / 1000;
+
         const assistantMessage = botResponseData.messages.find(
           (m) => m.message_type === "assistant_message"
         );
@@ -690,6 +795,8 @@ export default function ChatClient() {
           fullResponse: botResponseData,
           timestamp: new Date().toISOString(),
           latency: latency,
+          // Usar usage_metadata diretamente do assistant_message
+          usage_metadata: assistantMessage?.usage_metadata,
         };
         setMessages((prev) => {
           return [...prev, botMessage];
@@ -1200,9 +1307,7 @@ export default function ChatClient() {
                                       </div>
                                     </AccordionTrigger>
 
-                                    <AccordionContent className="p-4 space-y-4">
-                                      {/* Buscar todas as mensagens da interação */}
-
+                                    <AccordionContent className="p-4">
                                       {(() => {
                                         const currentIndex =
                                           historyMessages.findIndex(
@@ -1271,190 +1376,13 @@ export default function ChatClient() {
                                                   "reasoning_message")
                                           );
 
-                                        // Define isDarkMode for reasoning code blocks
-                                        const isDarkMode = typeof window !== 'undefined'
-                                          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-                                          : false;
-
                                         return (
-                                          <div className="space-y-2">
-                                            {interactionSteps.length > 0 ? (
-                                              interactionSteps.map(
-                                                (step, stepIndex) => (
-                                                  <div
-                                                    key={`step-${step.id}-${stepIndex}`}
-                                                    className="space-y-2 border-l-2 border-muted pl-3"
-                                                  >
-                                                    <div className="flex items-center gap-2">
-                                                      {getStepIcon(
-                                                        step.message_type
-                                                      )}
-
-                                                      <h5 className="font-semibold text-sm">
-                                                        {step.message_type.replace(
-                                                          /_/g,
-                                                          " "
-                                                        )}
-                                                      </h5>
-
-                                                      {step.name && (
-                                                        <Badge variant="secondary">
-                                                          {step.name}
-                                                        </Badge>
-                                                      )}
-                                                    </div>
-
-                                                    {step.reasoning && (
-                                                      <div className="italic text-muted-foreground text-sm">
-                                                        <Markdown compact>{step.reasoning}</Markdown>
-                                                      </div>
-                                                    )}
-
-                                                    {step.tool_call && (
-                                                      <div>
-                                                        <p className="font-semibold text-sm capitalize mb-2">
-                                                          Tool Call Arguments:
-                                                        </p>
-
-                                                        <JsonViewer
-                                                          data={(() => {
-                                                            try {
-                                                              return typeof step
-                                                                .tool_call
-                                                                .arguments ===
-                                                                "string"
-                                                                ? JSON.parse(
-                                                                    step
-                                                                      .tool_call
-                                                                      .arguments
-                                                                  )
-                                                                : step
-                                                                    .tool_call
-                                                                    .arguments;
-                                                            } catch {
-                                                              return {
-                                                                raw: step
-                                                                  .tool_call
-                                                                  .arguments,
-                                                              };
-                                                            }
-                                                          })()}
-                                                        />
-                                                      </div>
-                                                    )}
-
-                                                    {step.tool_return && (
-                                                      <ToolReturnViewer
-                                                        toolReturn={
-                                                          step.tool_return
-                                                        }
-                                                        toolName={
-                                                          step.name ||
-                                                          undefined
-                                                        }
-                                                      />
-                                                    )}
-
-                                                    {step.content &&
-                                                      step.message_type ===
-                                                        "assistant_message" && (
-                                                        <div>
-                                                          <p className="font-semibold text-sm capitalize mb-2">
-                                                            Resposta
-                                                            Intermediária:
-                                                          </p>
-
-                                                          <div className="bg-muted/30 p-2 rounded">
-                                                            <Markdown>
-                                                              {typeof step.content === 'string' ? step.content : extractTextFromContent(step.content)}
-                                                            </Markdown>
-                                                          </div>
-                                                        </div>
-                                                      )}
-                                                  </div>
-                                                )
-                                              )
-                                            ) : (
-                                              <div className="text-sm text-muted-foreground italic">
-                                                Resposta direta sem uso de
-                                                ferramentas
-                                              </div>
-                                            )}
-                                          </div>
+                                          <MessageDetails
+                                            steps={interactionSteps}
+                                            usageMetadata={msg.usage_metadata}
+                                          />
                                         );
                                       })()}
-
-                                      <div className="space-y-2 pt-2 border-t">
-                                        <h4 className="font-semibold">
-                                          Informações da Mensagem
-                                        </h4>
-
-                                        <div className="text-sm space-y-1">
-                                          <div>
-                                            <span className="font-medium">
-                                              ID:
-                                            </span>{" "}
-                                            {msg.id}
-                                          </div>
-
-                                          <div>
-                                            <span className="font-medium">
-                                              Session ID:
-                                            </span>{" "}
-                                            {msg.session_id}
-                                          </div>
-
-                                          <div>
-                                            <span className="font-medium">
-                                              Data:
-                                            </span>{" "}
-                                            {new Date(
-                                              msg.date
-                                            ).toLocaleString("pt-BR")}
-                                          </div>
-
-                                          <div>
-                                            <span className="font-medium">
-                                              Tipo:
-                                            </span>{" "}
-                                            {msg.message_type}
-                                          </div>
-
-                                          {msg.model_name && (
-                                            <div>
-                                              <span className="font-medium">
-                                                Modelo:
-                                              </span>{" "}
-                                              {msg.model_name}
-                                            </div>
-                                          )}
-
-                                          {msg.finish_reason && (
-                                            <div>
-                                              <span className="font-medium">
-                                                Finish Reason:
-                                              </span>{" "}
-                                              {msg.finish_reason}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {msg.usage_metadata && (
-                                        <div className="space-y-2 pt-2 border-t">
-                                          <div className="flex items-center gap-2">
-                                            <BarChart2 className="h-4 w-4 text-purple-500" />
-
-                                            <h4 className="font-semibold">
-                                              Usage Metadata
-                                            </h4>
-                                          </div>
-
-                                          <JsonViewer
-                                            data={msg.usage_metadata}
-                                          />
-                                        </div>
-                                      )}
                                     </AccordionContent>
                                   </AccordionItem>
                                 </Accordion>
@@ -1635,82 +1563,15 @@ export default function ChatClient() {
                                                     </span>
                                                   </div>
                                                 </AccordionTrigger>
-                                                <AccordionContent className="p-4 space-y-4">
-                                                  {(() => {
-                                                    // Define isDarkMode for reasoning code blocks
-                                                    const isDarkMode = typeof window !== 'undefined'
-                                                      ? window.matchMedia('(prefers-color-scheme: dark)').matches
-                                                      : false;
-
-                                                    return msg.fullResponse.messages
-                                                      .filter(
-                                                        (m) =>
-                                                          m.message_type !== "assistant_message"
-                                                      )
-                                                      .map((step, stepIndex) => (
-                                                      <div
-                                                        key={`${step.id}-${step.message_type}-${stepIndex}`}
-                                                        className="space-y-2"
-                                                      >
-                                                        <div className="flex items-center gap-2">
-                                                          {getStepIcon(step.message_type)}
-                                                          <h4 className="font-semibold">
-                                                            {step.message_type.replace(/_/g, " ")}
-                                                          </h4>
-                                                          {step.name && (
-                                                            <Badge variant="secondary">
-                                                              {step.name}
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                        {step.reasoning && (
-                                                          <div className="italic text-muted-foreground text-base pl-6">
-                                                            <Markdown compact>{step.reasoning}</Markdown>
-                                                          </div>
-                                                        )}
-                                                        {step.tool_call && (
-                                                          <div>
-                                                            <p className="font-semibold text-base capitalize mb-2">
-                                                              Tool Call Arguments:
-                                                            </p>
-                                                            <JsonViewer
-                                                              data={(() => {
-                                                                try {
-                                                                  return typeof step.tool_call
-                                                                    .arguments === "string"
-                                                                    ? JSON.parse(
-                                                                        step.tool_call.arguments
-                                                                      )
-                                                                    : step.tool_call.arguments;
-                                                                } catch {
-                                                                  return {
-                                                                    raw: step.tool_call.arguments,
-                                                                  };
-                                                                }
-                                                              })()}
-                                                            />
-                                                          </div>
-                                                        )}
-                                                        {step.tool_return && (
-                                                          <ToolReturnViewer
-                                                            toolReturn={step.tool_return}
-                                                            toolName={step.name || undefined}
-                                                          />
-                                                        )}
-                                                      </div>
-                                                    ));
-                                                  })()}
-                                                  {msg.fullResponse.usage && (
-                                                    <div className="space-y-2 pt-2 border-t">
-                                                      <div className="flex items-center gap-2">
-                                                        <BarChart2 className="h-4 w-4 text-purple-500" />
-                                                        <h4 className="font-semibold">
-                                                          Usage Statistics
-                                                        </h4>
-                                                      </div>
-                                                      <JsonViewer data={msg.fullResponse.usage} />
-                                                    </div>
-                                                  )}
+                                                <AccordionContent className="p-4">
+                                                  <MessageDetails
+                                                    steps={msg.fullResponse.messages.filter(
+                                                      (m) =>
+                                                        m.message_type !== "assistant_message" &&
+                                                        m.message_type !== "user_message"
+                                                    )}
+                                                    usageMetadata={msg.usage_metadata}
+                                                  />
                                                 </AccordionContent>
                                               </AccordionItem>
                                             </Accordion>
@@ -1735,6 +1596,24 @@ export default function ChatClient() {
           textareaRef={textareaRef}
           attachedFiles={attachedFiles}
           onFilesChange={setAttachedFiles}
+          usageMetadata={(() => {
+            // Primeiro tenta pegar do chat atual (fullResponse.messages com usage_statistics)
+            const lastBotMessage = [...messages].reverse().find(msg => msg.sender === 'bot' && msg.fullResponse);
+            if (lastBotMessage?.fullResponse?.messages) {
+              const usageStats = lastBotMessage.fullResponse.messages.find(
+                (m: any) => m.message_type === 'usage_statistics'
+              );
+              if (usageStats) {
+                return usageStats;
+              }
+            }
+
+            // Se não tiver, pega do histórico
+            const usageStatsFromHistory = [...historyMessages].reverse().find(
+              msg => msg.message_type === 'usage_statistics'
+            );
+            return usageStatsFromHistory || null;
+          })()}
         />
       </Card>
 

@@ -294,7 +294,6 @@ async def interactive_chat(use_local=False):
 
                 # Use async_query for both agents
                 result = await agent.async_query(input=data, config=config, type=type)
-                # print(result)
                 # Parse and display the result
 
                 if type == "history":

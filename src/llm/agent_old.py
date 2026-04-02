@@ -41,6 +41,7 @@ class Agent:
         thinking_budget: int = -1,
         enable_streaming: bool = True,
         db_path: str | None = None,
+        response_format: Any = None,
     ):
         self._model = model
         self._tools = tools or []
@@ -51,6 +52,7 @@ class Agent:
         self._enable_streaming = enable_streaming
         self._setup_complete_async = False
         self.db_path = db_path or DB_PATH
+        self._response_format = response_format
 
     def _create_react_agent(
         self,
@@ -78,6 +80,7 @@ class Agent:
             system_prompt=self._system_prompt,
             checkpointer=checkpointer,
             middleware=[hooks_middleware],
+            response_format=self._response_format,
         )
 
     async def _ensure_async_setup(self):
@@ -91,11 +94,12 @@ class Agent:
         self._checkpointer_cm = AsyncSqliteSaver.from_conn_string(self.db_path)
         checkpointer = await self._checkpointer_cm.__aenter__()
         await checkpointer.setup()
-        logger.info(f"[Agent Setup] ✓ SQLite checkpointer created: {self.db_path}")
 
         self._create_react_agent(checkpointer=checkpointer)
-        logger.info("[Agent Setup] ✓ React agent created successfully (async)")
-        logger.info("[Agent Setup] ========== Agent Setup Complete ==========")
+
+        # Consolidated setup log
+        response_format_info = f" with response_format={type(self._response_format).__name__}" if self._response_format else ""
+        logger.info(f"[Agent Setup] ✓ Agent ready: {self.db_path}{response_format_info}")
 
         self._setup_complete_async = True
 
@@ -119,12 +123,6 @@ class Agent:
                 "Graph is not initialized. Call _ensure_async_setup first."
             )
 
-        # Debug: Log the config being passed
-        config = kwargs.get("config", {})
-        thread_id = config.get("configurable", {}).get("thread_id")
-        logger.info(f"[async_query] Config: {config}")
-        logger.info(f"[async_query] Thread ID: {thread_id}")
-
         type = kwargs.pop("type", None)
         if type == "history":
             # Bypass filtering for history requests
@@ -139,10 +137,13 @@ class Agent:
                 }
             except Exception as e:
                 return {"status_code": 500, "status": "error", "message": str(e)}
-        result = await self._graph.ainvoke(**kwargs)
-        filtered_result = self._filter_current_interaction(result)
-
-        return filtered_result
+        try:
+            result = await self._graph.ainvoke(**kwargs)
+            filtered_result = self._filter_current_interaction(result)
+            return filtered_result
+        except Exception as e:
+            logger.error(f"[async_query] Error in graph.ainvoke: {type(e).__name__}: {str(e)}", exc_info=True)
+            raise
 
     async def async_stream_events(self, **kwargs) -> AsyncIterable[Any]:
         """Asynchronous streaming with token-by-token events."""
@@ -274,30 +275,13 @@ class Agent:
 
                 updates.append(message)
 
-                # Log tool execution result
-                logger.info("[Tool Execution] Tool execution completed")
-                logger.info(
-                    f"[Tool Execution]   - Tool Call ID: {message.tool_call_id if hasattr(message, 'tool_call_id') else 'UNKNOWN'}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Tool Name: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Status: {message.status if hasattr(message, 'status') else 'success'}"
-                )
+                # Log tool execution result (consolidated)
+                tool_name = message.name if hasattr(message, 'name') else 'UNKNOWN'
+                status = message.status if hasattr(message, 'status') else 'success'
+                logger.info(f"[Tool Execution] {tool_name} completed ({status})")
 
-                # Log the content (result), but limit size for large responses
-                content_str = str(message.content)
-                if len(content_str) > 1000:
-                    logger.info(
-                        f"[Tool Execution]   - Result (first 1000 chars): {content_str[:1000]}..."
-                    )
-                    logger.info(
-                        f"[Tool Execution]   - Result length: {len(content_str)} characters"
-                    )
-                else:
-                    logger.info(f"[Tool Execution]   - Result: {content_str}")
-
+        if updates:
+            logger.debug(f"[Tool Execution] Processed {len(updates)} tool result(s)")
         return {"messages": updates} if updates else None
 
     def _add_timestamp_to_ai_message(self, message):
@@ -349,26 +333,12 @@ class Agent:
 
                 # Inject thread_id as user_id
                 tool_call["args"]["user_id"] = thread_id
-                logger.info(
-                    f"[Thread ID] Injected thread_id '{thread_id}' into tool call '{tool_name}'"
-                )
 
     def _log_tool_calls(self, message):
         """Log tool calls if present in the message."""
         if hasattr(message, "tool_calls") and message.tool_calls:
-            logger.info("[Tool Execution] AI Message with tool calls detected")
-            for i, tool_call in enumerate(message.tool_calls, 1):
-                logger.info(f"[Tool Execution] Tool Call #{i}:")
-                logger.info(
-                    f"[Tool Execution]   - Tool Name: {tool_call.get('name', 'UNKNOWN')}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Tool ID: {tool_call.get('id', 'UNKNOWN')}"
-                )
-                logger.info(
-                    f"[Tool Execution]   - Tool Args: {tool_call.get('args', {})}"
-                )
-                logger.info(f"[Tool Execution]   - Full Tool Call: {tool_call}")
+            tool_names = [tc.get('name', 'UNKNOWN') for tc in message.tool_calls]
+            logger.info(f"[Tool Execution] Calling {len(message.tool_calls)} tool(s): {', '.join(tool_names)}")
 
     def _wrap_tools_with_logging(self, tools: List[BaseTool]) -> List[BaseTool]:
         """Wrap each tool with logging to capture invocations."""
@@ -381,20 +351,13 @@ class Agent:
             def create_async_wrapper(original_func, tool_name):
                 @wraps(original_func)
                 async def async_wrapper(*args, **kwargs):
-                    logger.info(f"[Tool Invocation] ASYNC: Invoking tool: {tool_name}")
+                    logger.debug(f"[Tool Invocation] Invoking: {tool_name}")
                     try:
                         result = await original_func(*args, **kwargs)
-                        result_str = str(result)
-                        if len(result_str) > 500:
-                            logger.info(
-                                f"[Tool Invocation]   - Result (first 500 chars): {result_str[:500]}..."
-                            )
-                        else:
-                            logger.info(f"[Tool Invocation]   - Result: {result_str}")
                         return result
                     except Exception as e:
                         logger.error(
-                            f"[Tool Invocation]   - ERROR: {type(e).__name__}: {str(e)}",
+                            f"[Tool Invocation] ERROR in {tool_name}: {type(e).__name__}: {str(e)}",
                             exc_info=True,
                         )
                         raise
@@ -406,7 +369,6 @@ class Agent:
 
             wrapped_tools.append(tool)
 
-        logger.info(f"[Tool Wrapping] Wrapped {len(wrapped_tools)} tools with logging")
         return wrapped_tools
 
     def _inject_thread_id_into_state(self, **kwargs):
@@ -455,9 +417,6 @@ class Agent:
                             if has_int:
                                 # Wrap in repr to ensure it stays a string when Vertex parses it
                                 message["content"] = repr(content)
-                                logger.info(
-                                    f"Sanitized input message: wrapped content in quotes: {message['content']}"
-                                )
                     except (ValueError, SyntaxError):
                         pass
             # Handle objects (if input is BaseMessage objects)
@@ -468,15 +427,16 @@ class Agent:
                         has_int = any(isinstance(item, int) for item in parsed)
                         if has_int:
                             message.content = repr(message.content)
-                            logger.info(
-                                f"Sanitized input message object: wrapped content in quotes: {message.content}"
-                            )
                 except (ValueError, SyntaxError):
                     pass
         return kwargs
 
     def _filter_current_interaction(self, result: dict) -> dict:
         """Filters response to include only messages from the last human input."""
+        logger.debug(f"[_filter_current_interaction] result type: {type(result)}, value: {str(result)[:200]}")
+        if not isinstance(result, dict):
+            logger.warning(f"[_filter_current_interaction] result is not a dict, type={type(result)}")
+            return result
         if "messages" not in result or not isinstance(result["messages"], list):
             return result
         messages = result["messages"]

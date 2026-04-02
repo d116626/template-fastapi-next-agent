@@ -50,7 +50,6 @@ class GeminiService:
             try:
                 # Timeout total para toda a operação
                 async with asyncio.timeout(180):  # 180 segundos para toda a operação
-                    logger.info(f"Prompt Length: {len(formatted_prompt)}")
                     tools = [
                         Tool(google_search=GoogleSearch()),
                         Tool(url_context=UrlContext()),
@@ -70,8 +69,6 @@ class GeminiService:
                             response_mime_type="text/plain",
                         ),
                     )
-
-                    logger.info("Resposta recebida do Gemini")
 
                     if not response.candidates or len(response.candidates) == 0:
                         logger.warning("Resposta sem candidatos válidos do Gemini")
@@ -112,7 +109,6 @@ class GeminiService:
                             "query": query,
                         }
 
-                    logger.info("Resolvendo URLs das fontes...")
                     resolved_urls_map = await resolve_urls(
                         urls_to_resolve=candidate.grounding_metadata.grounding_chunks
                     )
@@ -155,7 +151,8 @@ class GeminiService:
                     tokens_metadata = self.get_tokens_metadata(response=response)
 
                     logger.info(
-                        f"Pesquisa concluída com {len(sources_gathered)} fontes"
+                        f"Pesquisa Google concluída: {len(sources_gathered)} fontes, "
+                        f"{tokens_metadata.get('total_tokens', 0)} tokens"
                     )
 
                     return {
@@ -407,8 +404,6 @@ async def resolve_urls(urls_to_resolve: List[Any]) -> Dict[str, str]:
     unique_urls = list(set([uri.web.uri for uri in urls_to_resolve]))
     urls = [{"uri": uri} for uri in unique_urls]
 
-    # logger.info(f"Resolvendo {len(urls)} URLs únicas")
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
     }
@@ -430,9 +425,6 @@ async def resolve_urls(urls_to_resolve: List[Any]) -> Dict[str, str]:
         # Trata exceções não capturadas
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                # logger.error(
-                #     f"Erro não tratado ao processar URL {urls[i]['uri']}: {result}"
-                # )
                 urls[i]["url"] = urls[i]["uri"]
                 urls[i]["error"] = str(result)
             else:
