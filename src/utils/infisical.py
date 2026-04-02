@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from os import getenv
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pathlib import Path
 from src.utils.log import logger
 
@@ -47,8 +47,8 @@ def _load_dotenv() -> Dict[str, str]:
 
 
 def getenv_or_action(
-    env_name: str, *, action: str = "raise", default: str | None = None
-) -> str:
+    env_name: str, *, action: str = "raise", default: Optional[str] = None
+) -> Optional[str]:
     """Get an environment variable or raise an exception.
 
     Args:
@@ -86,7 +86,7 @@ def getenv_or_action(
 
 
 def getenv_list_or_action(
-    env_name: str, *, action: str = "raise", default: str = None
+    env_name: str, *, action: str = "raise", default: Optional[str] = None
 ) -> List[str]:
     """Get an environment variable or raise an exception.
 

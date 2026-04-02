@@ -2,7 +2,7 @@
 Configuração de modelos disponíveis para o agente.
 """
 
-from typing import List, Dict, TypedDict
+from typing import List, Dict, Optional, TypedDict
 
 
 class ModelInfo(TypedDict):
@@ -98,7 +98,7 @@ def get_available_models() -> List[ModelInfo]:
     return AVAILABLE_MODELS
 
 
-def get_model_info(model_code: str) -> ModelInfo | None:
+def get_model_info(model_code: str) -> Optional[ModelInfo]:
     """
     Retorna informações sobre um modelo específico.
 

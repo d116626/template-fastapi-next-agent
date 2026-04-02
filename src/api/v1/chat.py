@@ -158,31 +158,32 @@ async def _process_uploaded_files(
     """
     processed_files = []
     for file in files:
+        # Get metadata (before try block for error reporting)
+        mime_type = file.content_type or "application/octet-stream"
+        filename = file.filename or "unnamed_file"
+
         try:
             # Read file content
             file_content = await file.read()
 
-            # Get MIME type
-            mime_type = file.content_type or "application/octet-stream"
-
             # Process file and save to storage
             file_info = FileProcessor.process_file(
                 file_content,
-                file.filename,
+                filename,
                 mime_type,
                 save_to_storage=True,  # Save for VTX extraction
             )
             processed_files.append(file_info)
             logger.info(
-                f"[Chat API] Processed file: {file.filename} "
+                f"[Chat API] Processed file: {filename} "
                 f"(Type: {get_file_type_from_mime(file_info['mime_type'])}, "
                 f"MIME: {file_info['mime_type']}, Size: {file_info['size']} bytes)"
             )
 
         except ValueError as e:
             logger.warning(
-                f"[Chat API] Skipping unsupported file: {file.filename} "
-                f"(MIME: {file_info['mime_type']}) - {str(e)}"
+                f"[Chat API] Skipping unsupported file: {file.filename or 'unnamed'} "
+                f"(MIME: {mime_type}) - {str(e)}"
             )
             continue
         except Exception as e:
@@ -270,7 +271,8 @@ async def list_models():
     - Supported features (thinking, images, function calling)
     - Token limits
     """
-    models = get_available_models()
+    models_raw = get_available_models()
+    models = [ModelInfoResponse(**model) for model in models_raw]
     return ModelsListResponse(models=models)
 
 
@@ -472,6 +474,7 @@ async def send_message_stream(
                 # Accumulate messages for final formatting
                 accumulated_messages = []
                 accumulated_content = ""
+                accumulated_thinking = ""
 
                 # Stream events to client
                 async for event in stream:
@@ -503,6 +506,7 @@ async def send_message_stream(
                                             # Stream thinking content
                                             thinking_token = item.get("thinking", "")
                                             if thinking_token:
+                                                accumulated_thinking += thinking_token
                                                 thinking_event = json.dumps(
                                                     {
                                                         "type": "thinking_token",
@@ -537,6 +541,29 @@ async def send_message_stream(
                 logger.info(
                     f"[Chat API Stream] Stream completed for user {request.user_id}"
                 )
+
+                # Inject accumulated thinking into the final AIMessage
+                if accumulated_messages and accumulated_thinking:
+                    from langchain_core.messages import AIMessage
+
+                    # Find the last AIMessage and inject thinking
+                    for msg in reversed(accumulated_messages):
+                        if isinstance(msg, AIMessage):
+                            # Ensure content is a list
+                            if isinstance(msg.content, str):
+                                msg.content = [{"type": "text", "text": msg.content}]
+                            elif not isinstance(msg.content, list):
+                                msg.content = []
+
+                            # Prepend thinking to content array
+                            msg.content.insert(
+                                0,
+                                {"type": "thinking", "thinking": accumulated_thinking},
+                            )
+                            logger.info(
+                                f"[Chat API Stream] Injected {len(accumulated_thinking)} chars of thinking into AIMessage"
+                            )
+                            break
 
                 # Apply gateway format to accumulated messages
                 if accumulated_messages:

@@ -251,7 +251,7 @@ class FileProcessor:
     }
 
     @classmethod
-    def get_mime_from_filename(cls, filename: str) -> str | None:
+    def get_mime_from_filename(cls, filename: str) -> Optional[str]:
         """
         Tenta determinar o MIME type baseado na extensão do arquivo.
 

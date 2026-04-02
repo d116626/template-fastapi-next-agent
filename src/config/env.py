@@ -15,8 +15,8 @@ GEMINI_API_KEY = getenv_or_action(
     env_name="GEMINI_API_KEY", default=None, action="ignore"
 )
 API_TOKEN = getenv_or_action(env_name="API_TOKEN", action="ignore")
-LINK_BLACKLIST = getenv_or_action(
-    env_name="LINK_BLACKLIST", default="", action="ignore"
+LINK_BLACKLIST = (
+    getenv_or_action(env_name="LINK_BLACKLIST", default="", action="ignore") or ""
 ).split(",")
 GEMINI_SEARCH_MODEL = getenv_or_action(
     env_name="GEMINI_SEARCH_MODEL", default="gemini-2.5-flash", action="ignore"

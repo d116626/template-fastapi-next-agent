@@ -10,7 +10,7 @@ async def google_search(query: str):
     final_response = {}
     response_google = await gemini_service.google_search(
         query=query,
-        model=env.GEMINI_SEARCH_MODEL,
+        model=env.GEMINI_SEARCH_MODEL or "gemini-2.5-flash",
         temperature=0.0,
         retry_attempts=1,
     )

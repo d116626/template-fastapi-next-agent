@@ -235,6 +235,8 @@ def update_prompt(prompt_id: str, name: Optional[str] = None, prompt: Optional[s
 
         # Get updated data
         updated = get_prompt_by_id(prompt_id)
+        if not updated:
+            raise ValueError(f"Failed to retrieve updated prompt with ID '{prompt_id}'")
         return updated
 
     except sqlite3.IntegrityError as e:

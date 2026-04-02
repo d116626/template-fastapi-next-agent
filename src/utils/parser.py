@@ -162,9 +162,10 @@ class LangGraphMessageFormatter:
             ):
                 # Nova sessão: usar o timestamp atual como base para gerar o ID determinístico
                 self.current_session_start_time = message_timestamp
-                self.current_session_id = self.generate_deterministic_session_id(
-                    self.current_session_start_time, self.thread_id
-                )
+                if self.current_session_start_time:  # Only generate if timestamp exists
+                    self.current_session_id = self.generate_deterministic_session_id(
+                        self.current_session_start_time, self.thread_id
+                    )
 
         # Atualizar o último timestamp de mensagem
         if message_timestamp:
@@ -290,7 +291,7 @@ class LangGraphMessageFormatter:
         elif isinstance(raw_content, str):
             final_content = raw_content
 
-        # Adicionar mensagem de pensamento se houver conteúdo explícito ou tokens de reasoning
+        # Adicionar mensagem de pensamento se houver conteúdo explícito
         if thinking_content:
             messages.append(
                 {
@@ -302,24 +303,6 @@ class LangGraphMessageFormatter:
                     "signature": None,
                 }
             )
-        # elif reasoning_tokens > 0:
-        #     # Fallback para reasoning implícito (sem conteúdo textual exposto)
-        #     reasoning_text = "Processando..."
-        #     if tool_calls:
-        #         reasoning_text = f"Processando chamada para ferramenta {tool_calls[0].get('name', 'unknown')}"
-        #     elif final_content:
-        #         reasoning_text = "Processando resposta para o usuário"
-
-        #     messages.append(
-        #         {
-        #             **base_dict,
-        #             "id": f"reasoning-{base_dict['id'] or uuid.uuid4()}",
-        #             "message_type": "reasoning_message",
-        #             "source": "reasoner_model",
-        #             "reasoning": reasoning_text,
-        #             "signature": None,
-        #         }
-        #     )
 
         if tool_calls:
             # Construir mapeamento de tool_call_id para nome da ferramenta

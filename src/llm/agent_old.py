@@ -1,5 +1,5 @@
 import ast
-from typing import Any, AsyncIterable, Iterator, List
+from typing import Any, AsyncIterable, Iterator, List, Optional
 from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,7 +40,7 @@ class Agent:
         include_thoughts: bool = True,
         thinking_budget: int = -1,
         enable_streaming: bool = True,
-        db_path: str | None = None,
+        db_path: Optional[str] = None,
         response_format: Any = None,
     ):
         self._model = model
@@ -56,7 +56,7 @@ class Agent:
 
     def _create_react_agent(
         self,
-        checkpointer: AsyncSqliteSaver | None = None,
+        checkpointer: Optional[AsyncSqliteSaver] = None,
     ):
         """Create and configure the React Agent."""
         llm = ChatGoogleGenerativeAI(
@@ -98,8 +98,14 @@ class Agent:
         self._create_react_agent(checkpointer=checkpointer)
 
         # Consolidated setup log
-        response_format_info = f" with response_format={type(self._response_format).__name__}" if self._response_format else ""
-        logger.info(f"[Agent Setup] ✓ Agent ready: {self.db_path}{response_format_info}")
+        response_format_info = (
+            f" with response_format={type(self._response_format).__name__}"
+            if self._response_format
+            else ""
+        )
+        logger.info(
+            f"[Agent Setup] ✓ Agent ready: {self.db_path}{response_format_info}"
+        )
 
         self._setup_complete_async = True
 
@@ -142,7 +148,10 @@ class Agent:
             filtered_result = self._filter_current_interaction(result)
             return filtered_result
         except Exception as e:
-            logger.error(f"[async_query] Error in graph.ainvoke: {type(e).__name__}: {str(e)}", exc_info=True)
+            logger.error(
+                f"[async_query] Error in graph.ainvoke: {type(e).__name__}: {str(e)}",
+                exc_info=True,
+            )
             raise
 
     async def async_stream_events(self, **kwargs) -> AsyncIterable[Any]:
@@ -268,7 +277,12 @@ class Agent:
 
                 # Normalize tool response: extract first item if content is a list
                 if isinstance(message.content, list) and len(message.content) > 0:
-                    message.content = message.content[0]
+                    first_item = message.content[0]
+                    # Convert to string if it's a dict, otherwise keep as is
+                    if isinstance(first_item, dict):
+                        message.content = str(first_item)
+                    else:
+                        message.content = first_item
                     logger.debug(
                         f"[Tool Execution] Normalized list response to single item for tool: {message.name if hasattr(message, 'name') else 'UNKNOWN'}"
                     )
@@ -276,8 +290,8 @@ class Agent:
                 updates.append(message)
 
                 # Log tool execution result (consolidated)
-                tool_name = message.name if hasattr(message, 'name') else 'UNKNOWN'
-                status = message.status if hasattr(message, 'status') else 'success'
+                tool_name = message.name if hasattr(message, "name") else "UNKNOWN"
+                status = message.status if hasattr(message, "status") else "success"
                 logger.info(f"[Tool Execution] {tool_name} completed ({status})")
 
         if updates:
@@ -305,6 +319,10 @@ class Agent:
             # Check if tool has user_id parameter
             if hasattr(tool, "args_schema") and tool.args_schema:
                 schema = tool.args_schema
+
+                # Skip if schema is a dict (not a Pydantic model)
+                if isinstance(schema, dict):
+                    continue
 
                 if hasattr(schema, "__fields__") and "user_id" in schema.__fields__:
                     tool_names_expecting_user_id.add(tool.name)
@@ -337,8 +355,10 @@ class Agent:
     def _log_tool_calls(self, message):
         """Log tool calls if present in the message."""
         if hasattr(message, "tool_calls") and message.tool_calls:
-            tool_names = [tc.get('name', 'UNKNOWN') for tc in message.tool_calls]
-            logger.info(f"[Tool Execution] Calling {len(message.tool_calls)} tool(s): {', '.join(tool_names)}")
+            tool_names = [tc.get("name", "UNKNOWN") for tc in message.tool_calls]
+            logger.info(
+                f"[Tool Execution] Calling {len(message.tool_calls)} tool(s): {', '.join(tool_names)}"
+            )
 
     def _wrap_tools_with_logging(self, tools: List[BaseTool]) -> List[BaseTool]:
         """Wrap each tool with logging to capture invocations."""
@@ -433,9 +453,13 @@ class Agent:
 
     def _filter_current_interaction(self, result: dict) -> dict:
         """Filters response to include only messages from the last human input."""
-        logger.debug(f"[_filter_current_interaction] result type: {type(result)}, value: {str(result)[:200]}")
+        logger.debug(
+            f"[_filter_current_interaction] result type: {type(result)}, value: {str(result)[:200]}"
+        )
         if not isinstance(result, dict):
-            logger.warning(f"[_filter_current_interaction] result is not a dict, type={type(result)}")
+            logger.warning(
+                f"[_filter_current_interaction] result is not a dict, type={type(result)}"
+            )
             return result
         if "messages" not in result or not isinstance(result["messages"], list):
             return result

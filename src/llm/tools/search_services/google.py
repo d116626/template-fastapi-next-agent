@@ -396,7 +396,7 @@ async def process_link(session, link: dict):
     return link
 
 
-async def resolve_urls(urls_to_resolve: List[Any]) -> Dict[str, str]:
+async def resolve_urls(urls_to_resolve: List[Any]) -> Dict[str, Dict[str, Any]]:
     """
     Create a map of the vertex ai search urls (very long) to a short url with a unique id for each url.
     Ensures each original URL gets a consistent shortened form while maintaining uniqueness.
@@ -427,7 +427,7 @@ async def resolve_urls(urls_to_resolve: List[Any]) -> Dict[str, str]:
             if isinstance(result, Exception):
                 urls[i]["url"] = urls[i]["uri"]
                 urls[i]["error"] = str(result)
-            else:
+            elif isinstance(result, dict):
                 urls[i] = result
 
     resolved_map = {

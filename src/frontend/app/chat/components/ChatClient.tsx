@@ -746,12 +746,33 @@ export default function ChatClient() {
               const updated = [...prev];
               if (updated[streamingMessageIndex]) {
                 const currentMsg = updated[streamingMessageIndex];
+
+                // Se temos thinking acumulado via stream mas não há reasoning_message nas formattedMessages,
+                // injetar uma reasoning_message com o conteúdo do stream
+                let finalFormattedMessages = [...formattedMessages];
+                if (currentMsg.streamingThinking && !formattedMessages.find(m => m.message_type === "reasoning_message")) {
+                  const reasoningMsg = {
+                    id: `thinking-stream-${Date.now()}`,
+                    message_type: "reasoning_message" as const,
+                    reasoning: currentMsg.streamingThinking,
+                    date: new Date().toISOString(),
+                    name: null,
+                  };
+                  // Inserir reasoning_message antes do assistant_message
+                  const assistantIdx = finalFormattedMessages.findIndex(m => m.message_type === "assistant_message");
+                  if (assistantIdx >= 0) {
+                    finalFormattedMessages.splice(assistantIdx, 0, reasoningMsg);
+                  } else {
+                    finalFormattedMessages.unshift(reasoningMsg);
+                  }
+                }
+
                 updated[streamingMessageIndex] = {
                   sender: "bot",
                   content:
                     assistantMessage?.content ||
                     "Não foi possível obter uma resposta do assistente.",
-                  fullResponse: { user_id: userId, messages: formattedMessages },
+                  fullResponse: { user_id: userId, messages: finalFormattedMessages },
                   timestamp: new Date().toISOString(),
                   latency: latency,
                   isStreaming: false,

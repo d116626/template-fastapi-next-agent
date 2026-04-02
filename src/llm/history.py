@@ -4,6 +4,7 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langchain_core.runnables import RunnableConfig
 import aiosqlite
 
 from src.utils.log import logger
@@ -24,7 +25,7 @@ async def get_thread_history(thread_id: str, limit: Optional[int] = None) -> Lis
     try:
         async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
             # Get the latest checkpoint for this thread
-            config = {"configurable": {"thread_id": thread_id}}
+            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
             checkpoint_tuple = await checkpointer.aget_tuple(config)
 
             if not checkpoint_tuple:

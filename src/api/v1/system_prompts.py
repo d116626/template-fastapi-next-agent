@@ -51,7 +51,8 @@ async def list_prompts():
     Get all system prompts.
     """
     try:
-        prompts = get_all_prompts()
+        prompts_raw = get_all_prompts()
+        prompts = [SystemPromptResponse(**p) for p in prompts_raw]
         return SystemPromptsListResponse(prompts=prompts)
     except Exception as e:
         logger.error(f"[SystemPrompts API] Error listing prompts: {e}", exc_info=True)
