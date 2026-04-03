@@ -76,11 +76,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
     return 'other';
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const newFiles: AttachedFile[] = [];
+    const filePromises: Promise<AttachedFile>[] = [];
 
     Array.from(files).forEach((file) => {
       const fileType = getFileType(file);
@@ -91,27 +91,36 @@ const ChatInput: React.FC<ChatInputProps> = ({
         return;
       }
 
-      const attachedFile: AttachedFile = {
-        file,
-        type: fileType,
-      };
-
-      // Criar preview para imagens
+      // Criar preview para imagens (assíncrono)
       if (fileType === 'image') {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          attachedFile.preview = e.target?.result as string;
-          onFilesChange([...attachedFiles, attachedFile]);
-        };
-        reader.readAsDataURL(file);
+        const promise = new Promise<AttachedFile>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            resolve({
+              file,
+              type: fileType,
+              preview: e.target?.result as string,
+            });
+          };
+          reader.readAsDataURL(file);
+        });
+        filePromises.push(promise);
       } else {
-        newFiles.push(attachedFile);
+        // Arquivo não-imagem (síncrono)
+        filePromises.push(
+          Promise.resolve({
+            file,
+            type: fileType,
+          })
+        );
       }
     });
 
-    if (newFiles.length > 0) {
-      onFilesChange([...attachedFiles, ...newFiles]);
-    }
+    // Aguardar TODAS as imagens carregarem
+    const newFiles = await Promise.all(filePromises);
+
+    // Atualizar estado UMA ÚNICA VEZ com todos os arquivos
+    onFilesChange([...attachedFiles, ...newFiles]);
 
     // Reset input
     if (fileInputRef.current) {
@@ -148,7 +157,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     e.stopPropagation();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -157,7 +166,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const files = e.dataTransfer.files;
     if (!files || files.length === 0) return;
 
-    const newFiles: AttachedFile[] = [];
+    const filePromises: Promise<AttachedFile>[] = [];
 
     Array.from(files).forEach((file) => {
       const fileType = getFileType(file);
@@ -168,27 +177,36 @@ const ChatInput: React.FC<ChatInputProps> = ({
         return;
       }
 
-      const attachedFile: AttachedFile = {
-        file,
-        type: fileType,
-      };
-
-      // Criar preview para imagens
+      // Criar preview para imagens (assíncrono)
       if (fileType === 'image') {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          attachedFile.preview = e.target?.result as string;
-          onFilesChange([...attachedFiles, attachedFile]);
-        };
-        reader.readAsDataURL(file);
+        const promise = new Promise<AttachedFile>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            resolve({
+              file,
+              type: fileType,
+              preview: e.target?.result as string,
+            });
+          };
+          reader.readAsDataURL(file);
+        });
+        filePromises.push(promise);
       } else {
-        newFiles.push(attachedFile);
+        // Arquivo não-imagem (síncrono)
+        filePromises.push(
+          Promise.resolve({
+            file,
+            type: fileType,
+          })
+        );
       }
     });
 
-    if (newFiles.length > 0) {
-      onFilesChange([...attachedFiles, ...newFiles]);
-    }
+    // Aguardar TODAS as imagens carregarem
+    const newFiles = await Promise.all(filePromises);
+
+    // Atualizar estado UMA ÚNICA VEZ com todos os arquivos
+    onFilesChange([...attachedFiles, ...newFiles]);
 
     toast.success(`${files.length} arquivo(s) anexado(s)`);
   };
