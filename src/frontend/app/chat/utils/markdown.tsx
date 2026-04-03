@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Copy, Check } from 'lucide-react';
 
 interface MarkdownProps {
@@ -100,7 +101,7 @@ export const Markdown: React.FC<MarkdownProps> = ({ children, className = '', co
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
         h1: ({node, ...props}) => <h1 className={compact ? "text-base font-bold mb-1 mt-2" : "text-xl font-bold mb-2 mt-3"} {...props} />,
         h2: ({node, ...props}) => <h2 className={compact ? "text-sm font-bold mb-1 mt-1.5" : "text-lg font-bold mb-1.5 mt-2.5"} {...props} />,
@@ -134,6 +135,29 @@ export const Markdown: React.FC<MarkdownProps> = ({ children, className = '', co
         a: ({node, ...props}) => (
           <a className="text-primary hover:underline" {...props} />
         ),
+        // Tabelas (requer remark-gfm)
+        table: ({node, ...props}) => (
+          <div className={compact ? "overflow-x-auto my-1" : "overflow-x-auto my-2"}>
+            <table className="border-collapse border border-border w-full text-sm" {...props} />
+          </div>
+        ),
+        thead: ({node, ...props}) => (
+          <thead className="bg-muted" {...props} />
+        ),
+        tbody: ({node, ...props}) => (
+          <tbody {...props} />
+        ),
+        tr: ({node, ...props}) => (
+          <tr className="border-b border-border" {...props} />
+        ),
+        th: ({node, ...props}) => (
+          <th className="border border-border px-3 py-2 text-left font-semibold" {...props} />
+        ),
+        td: ({node, ...props}) => (
+          <td className="border border-border px-3 py-2" {...props} />
+        ),
+        // Quebra de linha
+        br: ({node, ...props}) => <br {...props} />,
       }}
     >
       {children}
