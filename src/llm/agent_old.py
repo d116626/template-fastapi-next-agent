@@ -1,4 +1,5 @@
 import ast
+import asyncio
 from typing import Any, AsyncIterable, Iterator, List, Optional
 from functools import wraps
 from datetime import datetime, timezone
@@ -108,17 +109,6 @@ class Agent:
         )
 
         self._setup_complete_async = True
-
-    async def async_cleanup(self):
-        """Clean up resources, particularly the checkpointer connection."""
-        if self._checkpointer_cm is not None:
-            try:
-                await self._checkpointer_cm.__aexit__(None, None, None)
-                logger.info("[Agent Cleanup] ✓ Checkpointer closed")
-            except Exception as e:
-                logger.error(f"[Agent Cleanup] Error closing checkpointer: {e}")
-            finally:
-                self._checkpointer_cm = None
 
     async def async_query(self, **kwargs) -> dict[str, Any] | Any:
         """Asynchronous query execution with filtered current interaction."""
@@ -480,3 +470,37 @@ class Agent:
         if isinstance(chunk, dict) and "messages" in chunk:
             return self._filter_current_interaction(chunk)
         return chunk
+
+    async def async_cleanup(self):
+        """Clean up resources, particularly the checkpointer connection."""
+        if self._checkpointer_cm is not None:
+            try:
+                await self._checkpointer_cm.__aexit__(None, None, None)
+                logger.info("[Agent Cleanup] ✓ Checkpointer closed")
+            except Exception as e:
+                logger.error(f"[Agent Cleanup] Error closing checkpointer: {e}")
+            finally:
+                self._checkpointer_cm = None
+
+    def __del__(self):
+        """
+        Auto-cleanup when object is garbage collected.
+
+        Attempts to close checkpointer connection if cleanup wasn't called.
+        This is a safety net for connection leaks.
+        """
+        if hasattr(self, "_checkpointer_cm") and self._checkpointer_cm is not None:
+            logger.warning(
+                "[Agent Cleanup] ⚠️  Agent destroyed without cleanup() - forcing cleanup via __del__()"
+            )
+            try:
+                # Try to get running event loop
+                loop = asyncio.get_running_loop()
+                # Schedule cleanup in the running loop
+                loop.create_task(self.async_cleanup())
+            except RuntimeError:
+                # No running loop - try to run cleanup synchronously
+                try:
+                    asyncio.run(self.async_cleanup())
+                except Exception as e:
+                    logger.error(f"[Agent Cleanup] Failed to cleanup in __del__: {e}")
